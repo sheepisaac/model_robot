@@ -1,0 +1,3 @@
+﻿vcrobot/**/__pycache__/
+*.py[cod]
+UGV02/ugv_base_general-main/General_Driver/build/

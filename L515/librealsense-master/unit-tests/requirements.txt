@@ -1,0 +1,25 @@
+# YKUSH hub (not used on Jetson/aarch64)
+yepkit-pykush==0.3.5; platform_machine != "aarch64"
+
+# Acroname hub (not used on Jetson/aarch64)
+brainstem==2.12.4; platform_machine != "aarch64"
+
+# Unifi hub (not used on Jetson/aarch64)
+paramiko==3.5.1; platform_machine != "aarch64"
+
+# Common testing requirements
+opencv-python==4.11.0.86
+numpy==2.0.2 # max version currently working on Jetson
+
+# Pytest framework (cross-platform)
+pytest==8.3.5
+pytest-timeout==2.2.0
+# 16.1+ requires Python >= 3.10; Jetson JetPack 5 benches run 3.8. Retry-guard
+# infra tests verified green on both pins.
+pytest-rerunfailures==16.4; python_version >= "3.10"
+pytest-rerunfailures==16.0.1; python_version < "3.10"
+pytest-repeat==0.9.3
+pytest-check==2.8.0
+
+
+# REST API deps: wrappers/rest-api/requirements.txt + unit-tests/wrappers/rest-api/requirements.txt

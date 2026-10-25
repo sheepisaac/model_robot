@@ -1,0 +1,106 @@
+# License: Apache 2.0. See LICENSE file in root directory.
+# Copyright(c) 2026 RealSense, Inc. All Rights Reserved.
+
+import pytest
+import pyrealsense2 as rs
+from rspy import devices
+from rspy.timer import Timer
+import platform
+import time
+import logging
+log = logging.getLogger(__name__)
+
+# hw reset test, we want to make sure the device disconnect & reconnect successfully
+
+pytestmark = [
+    pytest.mark.device_each("D400*"),
+    pytest.mark.device_each("D500*"),
+]
+
+dev = None
+target_sn = None   # cached once before hardware_reset() - the removed dev handle cannot be queried safely
+device_removed = False
+device_added = False
+device_removed_time = 0
+device_added_time = 0
+added_sensors = None   # sensor set of the re-added device, as the callback saw it
+
+
+def sensor_names( device ):
+    return sorted( s.get_info( rs.camera_info.name ) for s in device.query_sensors() )
+
+
+def device_changed( info ):
+    global dev, device_removed, device_added, device_removed_time, device_added_time, added_sensors
+    if dev and info.was_removed( dev ):
+        device_removed_time = time.perf_counter()
+        device_removed = True
+    for new_dev in info.get_new_devices():
+        if new_dev.get_info( rs.camera_info.serial_number ) == target_sn:
+            device_added_time = time.perf_counter()
+            device_added = True
+            # Sampled here, not after the test wakes up: a device published before all
+            # of its interfaces have enumerated is repaired by a later event, so polling
+            # for it afterwards would not see the partial one the application got.
+            if added_sensors is None:
+                added_sensors = sensor_names( new_dev )
+
+
+def test_hw_reset_sanity( test_device ):
+    global dev, target_sn, device_removed, device_added, device_removed_time, device_added_time, added_sensors
+    device_removed = False
+    device_added = False
+    device_removed_time = 0
+    device_added_time = 0
+    added_sensors = None
+
+    t = Timer( 10 )
+    dev, ctx = test_device
+    target_sn = dev.get_info( rs.camera_info.serial_number )
+    expected_sensors = sensor_names( dev )
+    log.info( "Sensors before reset: %s", expected_sensors )
+    connection_type = dev.get_info( rs.camera_info.connection_type ) if dev.supports( rs.camera_info.connection_type ) else None
+    ctx.set_devices_changed_callback( device_changed )
+    time.sleep(1)
+    log.info( "Sending HW-reset command" )
+    reset_time = time.perf_counter()
+    dev.hardware_reset()
+
+    log.info( "Pending for device removal" )
+    t.start()
+    while not t.has_expired():
+        if (device_removed):
+            break
+        time.sleep( 0.1 )
+
+    assert device_removed, "device was not removed after hardware_reset"
+
+    # Regression guard for the Windows UVC+HID watcher gate that used to defer removal up to 15s.
+    # DDS devices don't go through this gate and have their own reset-to-enumeration timing — skip them.
+    removal_latency = device_removed_time - reset_time
+    log.info( "Removal latency: %.2f [sec]", removal_latency )
+    if platform.system() == "Windows" and connection_type != "DDS":
+        assert removal_latency < 2.5, \
+            f"removal took {removal_latency:.2f}s — expected under 2.5s on Windows USB"
+
+    log.info( "Pending for device addition" )
+    t = Timer( devices.MAX_ENUMERATION_TIME )
+    t.start()
+    while not t.has_expired():
+        if ( device_added ):
+            break
+        time.sleep(0.1)
+
+    if device_added_time:
+        log.info( "Device reset cycle took %s [sec]", device_added_time - device_removed_time )
+    else:
+        log.error( "Device not connected back after %s [sec]", t.get_elapsed() )
+        log.info( "Querying there are %s devices", len( ctx.query_devices() ) )
+
+    assert device_added, "device did not re-appear within MAX_ENUMERATION_TIME"
+
+    # The device must come back whole. A re-enumeration that publishes the device
+    # before all its interfaces are up surfaces here as a missing sensor - typically
+    # the Motion Module, leaving the application with a camera that has no IMU.
+    log.info( "Sensors after reset: %s", added_sensors )
+    assert added_sensors == expected_sensors, f"device re-enumerated with {added_sensors}, expected {expected_sensors}"

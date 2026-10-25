@@ -1,0 +1,259 @@
+// API Types for RealSense REST API
+
+export interface DeviceInfo {
+  device_id: string
+  name: string
+  serial_number: string
+  firmware_version?: string
+  physical_port?: string
+  usb_type?: string
+  product_id?: string
+  sensors: string[]
+  is_streaming: boolean
+  metadata_enabled?: boolean | null
+}
+
+/** Display label for an SDK name: "deepSeaMedianThreshold" -> "Deep Sea Median Threshold". */
+export function optionLabel(id: string): string {
+  return id
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+/**
+ * Options that are plumbing rather than controls - the set the legacy viewer hides in
+ * viewer_model::hide_common_options(). What to draw is the viewer's call, so everything
+ * the API reports passes through here.
+ */
+const HIDDEN_OPTIONS = [
+  'frames_queue_size', 'stream_filter', 'stream_format_filter', 'stream_index_filter',
+  'noise_estimation', 'region_of_interest', 'readout_shaping', 'sensors_config_mode',
+]
+
+export function visibleOptions(options: OptionInfo[]): OptionInfo[] {
+  return options.filter((o) => !HIDDEN_OPTIONS.includes(o.option_id.toLowerCase()))
+}
+
+export type FirmwareStatus = 'up_to_date' | 'outdated' | 'unknown'
+
+/** Numeric compare of dotted firmware versions. */
+export function firmwareStatus(current?: string, recommended?: string): FirmwareStatus {
+  const parse = (v?: string) => v?.split('.').map(Number)
+  const [cur, rec] = [parse(current), parse(recommended)]
+  if (!cur || !rec || cur.some(isNaN) || rec.some(isNaN)) return 'unknown'
+  for (let i = 0; i < Math.max(cur.length, rec.length); i++) {
+    if ((cur[i] ?? 0) !== (rec[i] ?? 0)) return (cur[i] ?? 0) < (rec[i] ?? 0) ? 'outdated' : 'up_to_date'
+  }
+  return 'up_to_date'
+}
+
+// No verdict stored: it would go stale as soon as the camera reports a different version.
+export interface FirmwareState {
+  recommended?: string
+  is_updating?: boolean
+  phase?: 'downloading' | 'installing'  // one-click update: download then install
+  progress?: number
+  last_error?: string | null
+}
+
+// Wire shape of GET/POST /devices/{id}/advanced_mode/
+export interface AdvancedModeStatus {
+  supported: boolean
+  enabled: boolean
+}
+
+export interface SensorInfo {
+  sensor_id: string
+  name: string
+  type: string
+  supported_stream_profiles: SupportedStreamProfile[]
+  options: OptionInfo[]
+}
+
+export interface SupportedStreamProfile {
+  stream_type: string
+  resolutions: [number, number][]
+  fps: number[]
+  formats: string[]
+}
+
+export interface OptionInfo {
+  option_id: string
+  description?: string
+  current_value: number | boolean | string
+  default_value: number | boolean | string
+  min_value: number
+  max_value: number
+  step?: number
+  units?: string
+  read_only: boolean
+  value_descriptions?: Record<string, string>  // For enum-type options: {value: description}
+}
+
+// A sensor's post-processing filters, keyed by name. Filters share option names
+// (holes_fill lives on three of them), so the key is what tells those controls apart.
+export type SensorFilters = Record<string, {
+  enabled: boolean
+  default_enabled: boolean
+  options: OptionInfo[]
+}>
+
+/** Advanced-mode controls, keyed by the control group that owns them. */
+export type AdvancedControls = Record<string, OptionInfo[]>
+
+/** The panels the viewer draws, in the order the C++ viewer uses (device-model.cpp). */
+export const SECTIONS = ['Controls', 'Advanced Controls', 'Depth Visualization', 'Post-Processing'] as const
+
+/**
+ * One list of controls with one endpoint behind it, keyed by that endpoint's path under
+ * the device: the four control sources differ only in their path, not in their shape.
+ */
+export interface ControlGroup {
+  section: typeof SECTIONS[number]
+  sensorId: string    // the sensor it is drawn under, which for a device-level group
+                      // (the colorizer, advanced mode) is the depth sensor
+  name: string        // '' when the section draws its controls without a subheader
+  enabled?: boolean   // filters only: whether the frame passes through it
+  default_enabled?: boolean
+  options: OptionInfo[]
+}
+
+export interface StreamConfig {
+  sensor_id: string
+  stream_type: string
+  format: string
+  resolution: { width: number; height: number }
+  framerate: number
+  enable: boolean
+}
+
+export interface WebRTCOffer {
+  device_id: string
+  stream_types: string[]
+}
+
+export interface WebRTCSession {
+  session_id: string
+  sdp: string
+  type: string
+}
+
+export interface ICECandidate {
+  candidate: string
+  sdpMid: string
+  sdpMLineIndex: number
+}
+
+// Metadata from Socket.IO
+export interface StreamMetadata {
+  stream_type: string
+  timestamp: number
+  frame_number: number
+  // frame dims after post processing
+  width: number
+  height: number
+  motion_data?: IMUData
+  point_cloud?: PointCloudData
+  frame_metadata?: Record<string, number>
+  clock_domain?: string
+  hardware_fps?: number
+  pixel_format?: string
+  // frame dims as received from camera
+  hardware_width?: number
+  hardware_height?: number
+}
+
+export interface IMUData {
+  x: number
+  y: number
+  z: number
+}
+
+export interface PointCloudData {
+  // Raw float32 bytes (Socket.IO binary attachment) or base64-encoded string (legacy server).
+  vertices: ArrayBuffer | string
+  texture_coordinates: number[]
+  // Per-vertex RGB triplets (uint8, 3 bytes per vertex), matching `vertices` 1:1
+  // when the server textured the cloud from a live color frame. Same wire
+  // encoding as vertices: ArrayBuffer over binary socket, base64 string otherwise.
+  colors?: ArrayBuffer | string
+}
+
+export interface MetadataUpdate {
+  device_id: string
+  is_streaming: boolean
+  timestamp_server: number
+  metadata_streams: Record<string, StreamMetadata>
+}
+
+// UI State types
+export type ViewMode = '2d' | '3d'
+
+export interface StreamLayout {
+  id: string
+  streamType: string
+  position: { x: number; y: number }
+  size: { width: number; height: number }
+}
+
+// Per-sensor configuration (resolution/FPS shared across all streams from same sensor)
+export interface SensorConfig {
+  resolution: { width: number; height: number }
+  framerate: number
+  isMotionSensor?: boolean // Motion sensors use per-stream FPS instead of shared
+}
+
+// Per-device state for multi-camera support
+export interface DeviceState {
+  device: DeviceInfo
+  firmware?: FirmwareState
+  advancedMode?: AdvancedModeStatus
+  // Every control the device shows, keyed by the endpoint that writes it.
+  controls: Record<string, ControlGroup>
+  /**
+   * Whether each sensor runs its post-processing at all, keyed by sensor_id, on unless
+   * set. Neither the SDK nor the API has such a switch - it is the viewer's, as in the
+   * legacy one (subdevice-model.h), and it leaves the per-filter choices alone.
+   */
+  postProcessing?: Record<string, boolean>
+  sensors: SensorInfo[]
+  streamConfigs: StreamConfig[]
+  sensorConfigs: Record<string, SensorConfig> // Per-sensor resolution/FPS, keyed by sensor_id
+  isStreaming: boolean
+  isActive: boolean // whether this device is shown in viewer
+  isLoading: boolean // loading sensors/options
+  streamMetadata: Record<string, StreamMetadata> // keyed by stream_type
+  // Per-sensor streaming state (sensor API)
+  sensorStreamingStatus: Record<string, SensorStreamStatus> // keyed by sensor_id
+}
+
+// Per-sensor streaming types (for sensor API)
+export interface SensorStreamConfig {
+  stream_type: string
+  format: string
+  resolution: { width: number; height: number }
+  framerate: number
+}
+
+export interface SensorStartRequest {
+  config: SensorStreamConfig
+}
+
+export interface SensorStreamStatus {
+  sensor_id: string
+  name: string
+  is_streaming: boolean
+  // Single stream_type for backward compatibility (first stream)
+  stream_type?: string | null
+  resolution?: { width: number; height: number } | null
+  framerate?: number | null
+  format?: string | null
+  // New: multiple streams support
+  stream_types?: string[]  // All active stream types
+  streams?: SensorStreamConfig[]  // All active stream configs
+  error?: string | null
+  started_at?: string | null
+  // UI-only: pending operation state for optimistic updates
+  pendingOp?: 'stopping' | null
+}

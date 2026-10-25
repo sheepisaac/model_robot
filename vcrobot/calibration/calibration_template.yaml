@@ -1,0 +1,16 @@
+schema_version: 1
+
+hand_eye:
+  # Fixed target, eye-in-hand convention used by OpenCV calibrateHandEye.
+  # Each T_BG maps gripper/end coordinates to robot base coordinates.
+  # Each T_CT maps calibration-target coordinates to camera coordinates.
+  samples:
+    - id: pose_000
+      T_BG: [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]
+      T_CT: [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]
+  output_transform: T_EC
+
+ugv_motion_csv:
+  required_columns:
+    [experiment_id, v_left, v_right, duration, distance_m, yaw_delta_rad]
+  notes: distance_m is signed forward arc length; wheel speeds are m/s.

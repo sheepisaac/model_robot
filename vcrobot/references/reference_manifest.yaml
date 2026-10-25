@@ -1,0 +1,44 @@
+schema_version: 1
+generated_from_local_archives: true
+note: >-
+  The supplied source trees contain no .git metadata, so commit SHAs cannot be
+  recovered honestly. Pin a commit before updating any reference and replace
+  ARCHIVE_NO_GIT_METADATA with that SHA.
+
+references:
+  roarm_firmware:
+    repository: https://github.com/waveshareteam/roarm_m2
+    revision: ARCHIVE_NO_GIT_METADATA
+    local_path: ../../RoArm_M2_S/roarm_m2-main
+    key_files:
+      RoArm-M2_example/RoArm-M2_config.h:
+        sha256: 6CF2F0A8369672C61DD57931508D98332F03253DEBEF1DF464FE99F738FF8226
+      RoArm-M2_example/RoArm-M2_module.h:
+        sha256: 6B65B1280C75F899441151B208138EAD28EF328BFC3483D38767466AE16D07BB
+  roarm_ros_model:
+    repository: https://github.com/waveshareteam/roarm_ws
+    branch_label: ros2-humble
+    revision: ARCHIVE_NO_GIT_METADATA
+    local_path: ../../RoArm_M2_S/roarm_ws-ros2-humble
+    usage: reference-only; final package has no ROS dependency
+  ugv_ros_firmware:
+    repository: https://github.com/waveshareteam/ugv_base_ros
+    revision: ARCHIVE_NO_GIT_METADATA
+    local_path: ../../UGV02/ugv_base_ros-main
+    key_files:
+      ROS_Driver/ugv_config.h:
+        sha256: 0FE3805CCD82DA45A3A93F16F81CFAA71739C2EE43CCC93C50148EB29DAD3566
+      ROS_Driver/movtion_module.h:
+        sha256: 9AC910191271EAA7E9C78D47FD1B83F7902492789374DA4122935903FD151D09
+  ugv_general_firmware:
+    repository: https://github.com/waveshareteam/ugv_base_general
+    revision: ARCHIVE_NO_GIT_METADATA
+    local_path: ../../UGV02/ugv_base_general-main
+  librealsense:
+    repository: https://github.com/realsenseai/librealsense
+    revision: ARCHIVE_NO_GIT_METADATA
+    local_path: ../../L515
+    source_tree: librealsense-master
+    key_files:
+      rsutil.h:
+        sha256: 306393F1D64EEC7E72874ECB712A37588600750797D21EFC779F3B9D00A23737

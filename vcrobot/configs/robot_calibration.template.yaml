@@ -1,0 +1,39 @@
+schema_version: 1
+
+# This file is deliberately NOT hardware-ready.  Replace every
+# UNCALIBRATED field from measurements before enabling physical view planning.
+roarm:
+  eemode: 0                    # 0: gripper, 1: articulated wrist
+  firmware_source: RoArm-M2_config.h
+
+ugv:
+  wheel_diameter_m: 0.0800
+  encoder_pulses_per_rev: 660
+  effective_track_width_m: 0.172
+  left_scale: 1.0
+  right_scale: 1.0
+  calibrated: false
+
+l515:
+  status: UNCALIBRATED
+  width: 640
+  height: 480
+  fx: 600.0                   # synthetic test value; query the actual L515
+  fy: 600.0
+  ppx: 319.5
+  ppy: 239.5
+  model: none
+  coeffs: [0.0, 0.0, 0.0, 0.0, 0.0]
+
+extrinsics:
+  # T_XY maps coordinates from frame Y into frame X.
+  # B: UGV body, A: RoArm firmware Cartesian frame,
+  # E: modeled arm end, C: L515 optical frame (+X right,+Y down,+Z forward).
+  T_BA:
+    status: UNCALIBRATED
+    translation_m: [0.0, 0.0, 0.0]
+    rpy_deg: [0.0, 0.0, 0.0]
+  T_EC:
+    status: UNCALIBRATED
+    translation_m: [0.0, 0.0, 0.0]
+    rpy_deg: [0.0, 0.0, 0.0]

@@ -1,0 +1,179 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { http, HttpResponse } from 'msw'
+import { server } from '../../mocks/server'
+import { mockDeviceList, mockDevice } from '../../mocks/fixtures/devices'
+import { mockSensors, mockDepthOptions } from '../../mocks/fixtures/sensors'
+
+// Helper: capture the query string the apiClient sends on /devices/
+function captureDevicesQuery(): { current: string | null } {
+  const seen = { current: null as string | null }
+  server.use(
+    http.get('/api/v1/devices/', ({ request }) => {
+      seen.current = new URL(request.url).search
+      return HttpResponse.json(mockDeviceList)
+    })
+  )
+  return seen
+}
+
+// Note: apiClient is a singleton, so we need to import it fresh or reset state
+// For these tests, we'll test the API endpoints through MSW handlers
+
+describe('API Client', () => {
+  // Import the client dynamically to ensure it uses the mocked fetch
+  let apiClient: any
+
+  beforeEach(async () => {
+    // Dynamically import to get fresh instance with MSW active
+    const module = await import('@/api/client')
+    apiClient = module.apiClient
+  })
+
+  describe('getDevices', () => {
+    it('fetches devices from the API', async () => {
+      const devices = await apiClient.getDevices()
+      
+      expect(devices).toEqual(mockDeviceList)
+      expect(devices.length).toBeGreaterThanOrEqual(1)
+    })
+
+    it('returns device properties correctly', async () => {
+      const devices = await apiClient.getDevices()
+      const device = devices.find((d: any) => d.device_id === mockDevice.device_id)
+
+      expect(device).toBeDefined()
+      expect(device.name).toBe('RealSense D435')
+      expect(device.serial_number).toBe('123456789')
+      expect(device.firmware_version).toBe('5.16.0.1')
+    })
+
+    it('omits force_refresh from the query by default', async () => {
+      const seen = captureDevicesQuery()
+      await apiClient.getDevices()
+      expect(seen.current).toBe('')
+    })
+
+    it('omits force_refresh when forceRefresh=false', async () => {
+      const seen = captureDevicesQuery()
+      await apiClient.getDevices(false)
+      expect(seen.current).toBe('')
+    })
+
+    it('sends force_refresh=true when forceRefresh=true', async () => {
+      const seen = captureDevicesQuery()
+      await apiClient.getDevices(true)
+      expect(seen.current).toContain('force_refresh=true')
+    })
+  })
+
+  describe('getSensors', () => {
+    it('fetches sensors for a device', async () => {
+      const sensors = await apiClient.getSensors(mockDevice.device_id)
+      
+      expect(sensors).toEqual(mockSensors)
+      expect(sensors).toHaveLength(3)
+    })
+
+    it('returns sensor profiles correctly', async () => {
+      const sensors = await apiClient.getSensors(mockDevice.device_id)
+      const depthSensor = sensors.find((s: any) => s.name === 'Stereo Module')
+      
+      expect(depthSensor).toBeDefined()
+      if (depthSensor) {
+        expect(depthSensor.name).toBe('Stereo Module')
+        expect(depthSensor.supported_stream_profiles).toBeDefined()
+        expect(depthSensor.supported_stream_profiles.length).toBeGreaterThan(0)
+        // Check the first profile's stream_type
+        const firstProfile = depthSensor.supported_stream_profiles[0]
+        expect(firstProfile.stream_type).toBeDefined()
+      }
+    })
+  })
+
+  describe('getSensorFilters', () => {
+    it('answers the filter chain, keyed by filter name', async () => {
+      const filters = await apiClient.getSensorFilters(mockDevice.device_id, mockDevice.device_id + '-sensor-0')
+      expect(Object.keys(filters).length).toBeGreaterThan(0)
+      expect(filters['Decimation Filter'].options[0].option_id).toBe('filter_magnitude')
+    })
+  })
+
+  describe('setControl', () => {
+    it('answers the option as the device now holds it', async () => {
+      const result = await apiClient.setControl(
+        mockDevice.device_id, 'sensors/sensor-0/options', 'exposure', 10000
+      )
+
+      expect(result).toMatchObject({ option_id: 'exposure', current_value: 10000 })
+    })
+  })
+
+
+  describe('getDepthRange', () => {
+    it('returns depth range for a device', async () => {
+      const range = await apiClient.getDepthRange(mockDevice.device_id)
+      
+      expect(range.min_depth).toBe(0.3)
+      expect(range.max_depth).toBe(3.5)
+    })
+  })
+
+  describe('getDepthAtPixel', () => {
+    it('returns depth at specified pixel', async () => {
+      const result = await apiClient.getDepthAtPixel(mockDevice.device_id, 320, 240)
+      
+      expect(result.x).toBe(320)
+      expect(result.y).toBe(240)
+      expect(result.depth).toBe(1.5)
+    })
+  })
+
+  describe('Point Cloud', () => {
+    it('enables point cloud', async () => {
+      // enablePointCloud returns void, just check it doesn't throw
+      await expect(apiClient.enablePointCloud(mockDevice.device_id)).resolves.not.toThrow()
+    })
+
+    it('disables point cloud', async () => {
+      await expect(apiClient.disablePointCloud(mockDevice.device_id)).resolves.not.toThrow()
+    })
+  })
+
+  describe('Sensor Streaming', () => {
+    it('starts sensor streaming', async () => {
+      const result = await apiClient.startSensor(
+        mockDevice.device_id,
+        'sensor-0',
+        [{ stream_type: 'depth', width: 640, height: 480, format: 'Z16', fps: 30 }]
+      )
+      
+      expect(result.is_streaming).toBe(true)
+    })
+
+    it('stops sensor streaming', async () => {
+      const result = await apiClient.stopSensor(mockDevice.device_id, 'sensor-0')
+      
+      expect(result.is_streaming).toBe(false)
+    })
+  })
+
+  describe('Firmware', () => {
+    it('fetches the recommended version for a device', async () => {
+      server.use(
+        http.get('/api/v1/devices/:deviceId/firmware/', () =>
+          HttpResponse.json({ recommended: '5.17.3.10' })
+        )
+      )
+
+      const { recommended } = await apiClient.getRecommendedFirmware(mockDevice.device_id)
+
+      expect(recommended).toBe('5.17.3.10')
+    })
+  })
+
+  describe('resetDevice', () => {
+    it('resets a device', async () => {
+      await expect(apiClient.resetDevice(mockDevice.device_id)).resolves.not.toThrow()
+    })
+  })
+})

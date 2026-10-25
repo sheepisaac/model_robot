@@ -1,0 +1,160 @@
+# License: Apache 2.0. See LICENSE file in root directory.
+# Copyright(c) 2019 RealSense, Inc. All Rights Reserved.
+
+set(COMMON_SRC
+    "${CMAKE_CURRENT_LIST_DIR}/animated.h"
+    "${CMAKE_CURRENT_LIST_DIR}/cli.h"
+    "${CMAKE_CURRENT_LIST_DIR}/float2.h"
+    "${CMAKE_CURRENT_LIST_DIR}/float3.h"
+    "${CMAKE_CURRENT_LIST_DIR}/float4.h"
+    "${CMAKE_CURRENT_LIST_DIR}/matrix4.h"
+    "${CMAKE_CURRENT_LIST_DIR}/plane.h"
+    "${CMAKE_CURRENT_LIST_DIR}/rect.h"
+    "${CMAKE_CURRENT_LIST_DIR}/rendering.h"
+    "${CMAKE_CURRENT_LIST_DIR}/rendering.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/model-views.h"
+    "${CMAKE_CURRENT_LIST_DIR}/model-views.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/notifications.h"
+    "${CMAKE_CURRENT_LIST_DIR}/notifications.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/calibration-model.h"
+    "${CMAKE_CURRENT_LIST_DIR}/calibration-model.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/viewer.h"
+    "${CMAKE_CURRENT_LIST_DIR}/viewer.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/ux-window.h"
+    "${CMAKE_CURRENT_LIST_DIR}/ux-window.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/ux-alignment.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/ux-alignment.h"
+    "${CMAKE_CURRENT_LIST_DIR}/opengl3.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/opengl3.h"
+    "${CMAKE_CURRENT_LIST_DIR}/rs-config.h"
+    "${CMAKE_CURRENT_LIST_DIR}/rs-config.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/os.h"
+    "${CMAKE_CURRENT_LIST_DIR}/os.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/bag-conversion-helper.h"
+    "${CMAKE_CURRENT_LIST_DIR}/bag-conversion-helper.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/fw-update-common.h"
+    "${CMAKE_CURRENT_LIST_DIR}/fw-update-helper.h"
+    "${CMAKE_CURRENT_LIST_DIR}/fw-update-helper.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/metadata-helper.h"
+    "${CMAKE_CURRENT_LIST_DIR}/metadata-helper.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/output-model.h"
+    "${CMAKE_CURRENT_LIST_DIR}/output-model.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/skybox.h"
+    "${CMAKE_CURRENT_LIST_DIR}/skybox.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/measurement.h"
+    "${CMAKE_CURRENT_LIST_DIR}/measurement.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/objects-in-frame.h"
+    "${CMAKE_CURRENT_LIST_DIR}/objects-in-frame.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/utilities/com/center-of-mass.h"
+    "${CMAKE_CURRENT_LIST_DIR}/utilities/com/center-of-mass.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/on-chip-calib.h"
+    "${CMAKE_CURRENT_LIST_DIR}/on-chip-calib.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/d500-on-chip-calib.h"
+    "${CMAKE_CURRENT_LIST_DIR}/d500-on-chip-calib.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/updates-model.h"
+    "${CMAKE_CURRENT_LIST_DIR}/updates-model.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/option-model.h"
+    "${CMAKE_CURRENT_LIST_DIR}/option-model.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/control-model.h"
+    "${CMAKE_CURRENT_LIST_DIR}/control-section.h"
+    "${CMAKE_CURRENT_LIST_DIR}/control-section.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/device-model.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/device-model.h"
+    "${CMAKE_CURRENT_LIST_DIR}/subdevice-model.h"
+    "${CMAKE_CURRENT_LIST_DIR}/subdevice-model.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/processing-block-model.h"
+    "${CMAKE_CURRENT_LIST_DIR}/processing-block-model.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/stream-model.h"
+    "${CMAKE_CURRENT_LIST_DIR}/stream-model.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/post-processing-filters.h"
+    "${CMAKE_CURRENT_LIST_DIR}/post-processing-filters.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/close-range-depth-improver.h"
+    "${CMAKE_CURRENT_LIST_DIR}/close-range-depth-improver.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/close-range-depth-filter.h"
+    "${CMAKE_CURRENT_LIST_DIR}/rs-depth-range-loader.h"
+    "${CMAKE_CURRENT_LIST_DIR}/labeled-point-cloud-utilities.h"
+    "${CMAKE_CURRENT_LIST_DIR}/labeled-point-cloud-utilities.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/dds-model.h"
+    "${CMAKE_CURRENT_LIST_DIR}/dds-model.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/hdr-model.h"
+    "${CMAKE_CURRENT_LIST_DIR}/hdr-model.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/embedded-filter-model.h"
+    "${CMAKE_CURRENT_LIST_DIR}/composite-control-editor.h"
+    "${CMAKE_CURRENT_LIST_DIR}/embedded-filter-model.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/textual-icons.h"
+    )
+
+set(HTTP_FILES
+    "${CMAKE_CURRENT_LIST_DIR}/http/curl-wrapper.h"
+    "${CMAKE_CURRENT_LIST_DIR}/http/curl-wrapper.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/http/http-downloader.h"
+    "${CMAKE_CURRENT_LIST_DIR}/http/http-downloader.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/http/http-uploader.h"
+    )
+
+set(SW_UPDATE_FILES
+    "${CMAKE_CURRENT_LIST_DIR}/sw-update/dev-updates-profile.h"
+    "${CMAKE_CURRENT_LIST_DIR}/sw-update/dev-updates-profile.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/sw-update/versions-db-manager.h"
+    "${CMAKE_CURRENT_LIST_DIR}/sw-update/versions-db-manager.cpp"
+    )
+
+set(REFLECTIVITY_FILES
+    "${CMAKE_CURRENT_LIST_DIR}/reflectivity/reflectivity.h"
+    "${CMAKE_CURRENT_LIST_DIR}/reflectivity/reflectivity.cpp"
+    )
+
+set(ASSISTANT_FILES
+    "${CMAKE_CURRENT_LIST_DIR}/assistant/assistant-sse-event.h"
+    "${CMAKE_CURRENT_LIST_DIR}/assistant/assistant-sse-parser.h"
+    "${CMAKE_CURRENT_LIST_DIR}/assistant/assistant-sse-parser.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/assistant/assistant-chat-client.h"
+    "${CMAKE_CURRENT_LIST_DIR}/assistant/assistant-chat-client.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/assistant/assistant-image-decoder.h"
+    "${CMAKE_CURRENT_LIST_DIR}/assistant/assistant-image-decoder.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/assistant/assistant-image-cache.h"
+    "${CMAKE_CURRENT_LIST_DIR}/assistant/assistant-image-cache.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/assistant/assistant-model.h"
+    "${CMAKE_CURRENT_LIST_DIR}/assistant/assistant-model.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/assistant/assistant-launcher.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/assistant/assistant-panel.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/assistant/assistant-messages.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/assistant/assistant-markdown.h"
+    "${CMAKE_CURRENT_LIST_DIR}/assistant/assistant-markdown.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/../third-party/imgui_md/imgui_md.h"
+    "${CMAKE_CURRENT_LIST_DIR}/../third-party/imgui_md/imgui_md.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/../third-party/imgui_md/md4c.h"
+    "${CMAKE_CURRENT_LIST_DIR}/../third-party/imgui_md/md4c.c"
+    "${CMAKE_CURRENT_LIST_DIR}/assistant/assistant-ui-utils.h"
+    "${CMAKE_CURRENT_LIST_DIR}/assistant/assistant-ui-utils.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/assistant/assistant-text-sanitizer.h"
+    "${CMAKE_CURRENT_LIST_DIR}/assistant/assistant-text-sanitizer.cpp"
+    )
+
+# Vendored verbatim from upstream - suppress its warnings rather than patching it.
+if(MSVC)
+    set_source_files_properties("${CMAKE_CURRENT_LIST_DIR}/../third-party/imgui_md/imgui_md.cpp" PROPERTIES COMPILE_OPTIONS "/W0")
+else()
+    set_source_files_properties("${CMAKE_CURRENT_LIST_DIR}/../third-party/imgui_md/imgui_md.cpp" PROPERTIES COMPILE_OPTIONS "-w")
+endif()
+
+set(UTILITIES_FILES
+    "${CMAKE_CURRENT_LIST_DIR}/utilities/imgui/wrap.h"
+    "${CMAKE_CURRENT_LIST_DIR}/utilities/imgui/wrap.cpp"
+    )
+
+set(RUM_UPLOADER_FILES
+    "${CMAKE_CURRENT_LIST_DIR}/rum-uploader/rum-uploader.h"
+    "${CMAKE_CURRENT_LIST_DIR}/rum-uploader/rum-uploader.cpp"
+    )
+
+set(COMMON_SRC
+    ${COMMON_SRC}
+    ${HTTP_FILES}
+    ${SW_UPDATE_FILES}
+    ${REFLECTIVITY_FILES}
+    ${ASSISTANT_FILES}
+    ${UTILITIES_FILES}
+    ${RUM_UPLOADER_FILES}
+    )
+
