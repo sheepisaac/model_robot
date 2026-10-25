@@ -1,0 +1,45 @@
+schema_version: 1
+
+# This file is safe by default: it contains no executable motion sequence.
+# The master additionally requires both --execute and an acknowledgement token.
+control_root: ../../../vcrobot/scripts/ctrl_scripts
+model_config: configs/robot_calibration.template.yaml
+
+robot:
+  host: REPLACE_WITH_ROBOT_IP
+  arm_port: 50210
+  drive_port: 50220
+  vo_port: 50240
+  timeout_s: 5.0
+  sync_samples: 5
+
+safety:
+  # Hardware L/R values are normalized firmware commands, not metres/second.
+  max_abs_ugv_command: 0.12
+  max_ugv_duration_s: 1.5
+  max_arm_xyz_step_mm: 40.0
+  max_arm_t_step_rad: 0.30
+  max_arm_speed: 0.35
+
+sampling:
+  settle_s: 0.7
+
+ugv:
+  # Used only for the pre-calibration nominal prediction. The fitted result
+  # estimates separate left/right m/s-per-command scales from L515 motion.
+  nominal_mps_per_command: 0.20
+
+arm:
+  speed: 0.30
+
+output_jsonl: results/live_calibration.jsonl
+
+# Fill this only after a successful --probe and clearing the robot workspace.
+# UGV calibration syntax adds a required duration to the familiar go command.
+# Include straight, left-turn and right-turn samples to identify all parameters.
+commands: []
+# commands:
+#   - "go 0.08 0.08 1.0"
+#   - "go -0.06 0.06 0.8"
+#   - "go 0.06 -0.06 0.8"
+#   - "10 0 100 3.0"

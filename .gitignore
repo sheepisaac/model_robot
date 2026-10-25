@@ -1,3 +1,5 @@
 ﻿vcrobot/**/__pycache__/
 *.py[cod]
+vcrobot/configs/*.local.yaml
+vcrobot/results/
 UGV02/ugv_base_general-main/General_Driver/build/

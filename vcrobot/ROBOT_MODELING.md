@@ -1,5 +1,10 @@
 # Integrated robot-camera model
 
+For the guarded physical-robot feedback and L515 RGB-D odometry workflow, see
+[`LIVE_CALIBRATION.md`](LIVE_CALIBRATION.md). It uses short-range metric visual
+odometry as the independent motion reference when no IMU is installed, and
+keeps all generated parameters in candidate state until repeated validation.
+
 This directory adds a ROS-free, NumPy-based mathematical model for the UGV02,
 RoArm-M2-S and RealSense L515. It does not send motion commands. The existing
 `autonbv.motion.VCrobotTCPMotion` remains the only hardware-control boundary.

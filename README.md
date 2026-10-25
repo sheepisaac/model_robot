@@ -121,6 +121,8 @@ The `vcrobot` package currently provides:
 - Calibration validation and model-export utilities
 - Unit tests
 - An interactive OpenCV motion-model demo
+- A guarded live-calibration workflow that compares command/model motion,
+  firmware feedback, and L515 RGB-D visual odometry without requiring an IMU
 
 The OpenCV demo also reflects the physical modifications described during
 development:
@@ -252,6 +254,11 @@ Refer to [vcrobot/ROBOT_MODELING.md](vcrobot/ROBOT_MODELING.md) for cumulative
 encoder feedback, firmware `x y z t` feedback, reachability checks, and the
 remaining API examples.
 
+To connect the model to the physical robot, deploy the updated read-only
+feedback services and follow [vcrobot/LIVE_CALIBRATION.md](vcrobot/LIVE_CALIBRATION.md).
+The calibration plan is empty by default and physical motion requires an
+explicit acknowledgement flag.
+
 ## Calibration checklist before hardware use
 
 The template configuration is not sufficient for precise NBV operation or
@@ -300,6 +307,7 @@ calibration, command, feedback, and timestamp records.
 ## Related documentation
 
 - [Integrated robot-camera model](vcrobot/ROBOT_MODELING.md)
+- [Live robot/model calibration](vcrobot/LIVE_CALIBRATION.md)
 - [Reference provenance manifest](vcrobot/references/reference_manifest.yaml)
 - `vcrobot/configs/`: model and calibration configuration
 - `vcrobot/calibration/`: validation and calibration utilities
