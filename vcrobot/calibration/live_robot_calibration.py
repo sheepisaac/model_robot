@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Safely compare live UGV/RoArm motion with the integrated model and L515 VO.
 
-The command list accepts the same surface syntax as the existing controllers:
-``go L R DURATION`` for the UGV and ``X Y Z T`` for the arm.  The command type
-is inferred automatically.  Physical motion requires two explicit CLI flags.
+The command list accepts ``go L R DURATION`` for the UGV, absolute ``X Y Z T``
+for the arm, and ``arm_delta DX DY DZ DT`` for a move relative to fresh arm
+feedback. Physical motion requires two explicit CLI flags.
 """
 
 import argparse
@@ -83,11 +83,37 @@ def parse_surface_command(text):
         left, right, duration = map(float, fields[1:])
         return {"kind": "ugv", "left": left, "right": right,
                 "duration": duration, "text": text}
+    if fields[0].lower() == "arm_delta":
+        if len(fields) != 5:
+            raise ValueError(
+                "relative arm syntax is: arm_delta DX DY DZ DT")
+        dx, dy, dz, dt = map(float, fields[1:])
+        return {"kind": "arm_delta", "dx": dx, "dy": dy,
+                "dz": dz, "dt": dt, "text": text}
     if len(fields) == 4:
         x, y, z, t = map(float, fields)
         return {"kind": "arm", "x": x, "y": y, "z": z, "t": t,
                 "text": text}
-    raise ValueError("use 'go L R DURATION' or 'X Y Z T'")
+    raise ValueError(
+        "use 'go L R DURATION', 'X Y Z T', or 'arm_delta DX DY DZ DT'")
+
+
+def resolve_arm_command(before, command):
+    """Resolve a relative arm request against feedback read just before use."""
+    if command["kind"] == "arm":
+        return dict(command)
+    if command["kind"] != "arm_delta":
+        raise ValueError(f"not an arm command: {command['kind']}")
+    return {
+        "kind": "arm",
+        "x": float(before["x"]) + command["dx"],
+        "y": float(before["y"]) + command["dy"],
+        "z": float(before["z"]) + command["dz"],
+        "t": float(before["t"]) + command["dt"],
+        "text": command["text"],
+        "relative_delta": {key: command[key]
+                           for key in ("dx", "dy", "dz", "dt")},
+    }
 
 
 def yaw_from_transform(transform):
@@ -111,9 +137,16 @@ def comparison(predicted, measured):
 
 
 def pose_to_joints(model, position):
-    return model.roarm.inverse_kinematics({
-        "x_mm": position["x"], "y_mm": position["y"],
-        "z_mm": position["z"], "t": position["t"]})
+    target = {"x_mm": position["x"], "y_mm": position["y"],
+              "z_mm": position["z"], "t": position["t"]}
+    # Real feedback can sit exactly on a firmware servo clamp.  Requiring the
+    # stricter analytical limit then rejects a pose the physical controller is
+    # already holding.  Use the model's explicit firmware-emulation path; the
+    # arm slave still verifies the commanded Cartesian target after movement.
+    result = model.roarm.solve_ik_firmware(target)
+    if not result.success:
+        raise ValueError(result.reason)
+    return result.joint_angles.copy()
 
 
 def firmware_distance_delta(before, after, unit):
@@ -122,6 +155,18 @@ def firmware_distance_delta(before, after, unit):
         raise RuntimeError("configured firmware odometry unit is not m or cm")
     return ((float(after["odl"]) - float(before["odl"])) * scale,
             (float(after["odr"]) - float(before["odr"])) * scale)
+
+
+def firmware_odometry_available(*snapshots):
+    """Return whether every T=1001 snapshot contains usable wheel odometry."""
+    if not snapshots:
+        return False
+    return all(
+        bool(snapshot.get(
+            "odometry_available",
+            "odl" in snapshot and "odr" in snapshot))
+        for snapshot in snapshots
+    )
 
 
 class LiveCalibration:
@@ -236,13 +281,24 @@ class LiveCalibration:
         T_C0_C1 = np.asarray(vo["T_C0_C1"], dtype=float)
         T_BC = self.model.compute_camera_pose(np.zeros(3), joints)
         T_B0_B1_visual = T_BC.dot(T_C0_C1).dot(invert_transform(T_BC))
-        dl, dr = firmware_distance_delta(
-            telemetry_before, telemetry_after,
-            self.model.ugv.parameters.firmware_odometry_unit)
-        encoder_pose = self.model.ugv.integrate_odometry(
-            np.zeros(3), {"delta_left_m": dl, "delta_right_m": dr})
         from robot_models.transforms import pose2d_transform
-        T_encoder = pose2d_transform(encoder_pose)
+        has_encoder_odometry = firmware_odometry_available(
+            telemetry_before, telemetry_after)
+        if has_encoder_odometry:
+            dl, dr = firmware_distance_delta(
+                telemetry_before, telemetry_after,
+                self.model.ugv.parameters.firmware_odometry_unit)
+            encoder_pose = self.model.ugv.integrate_odometry(
+                np.zeros(3), {"delta_left_m": dl, "delta_right_m": dr})
+            encoder_vs_visual = comparison(
+                pose2d_transform(encoder_pose), T_B0_B1_visual)
+            firmware_wheel_delta_m = [dl, dr]
+        else:
+            encoder_vs_visual = {
+                "status": "UNAVAILABLE_FIRMWARE_HAS_NO_ODOMETRY",
+                "note": "L515 visual odometry remains the metric reference",
+            }
+            firmware_wheel_delta_m = None
         nominal_mps = float(self.config["ugv"].get(
             "nominal_mps_per_command", 1.0))
         expected_pose = self.model.ugv.predict_motion(
@@ -256,9 +312,10 @@ class LiveCalibration:
                 "reference": reference, "visual_odometry": vo,
                 "firmware_before": telemetry_before,
                 "firmware_after": telemetry_after,
-                "firmware_wheel_delta_m": [dl, dr],
+                "firmware_odometry_available": has_encoder_odometry,
+                "firmware_wheel_delta_m": firmware_wheel_delta_m,
                 "nominal_vs_visual": comparison(T_expected, T_B0_B1_visual),
-                "encoder_vs_visual": comparison(T_encoder, T_B0_B1_visual),
+                "encoder_vs_visual": encoder_vs_visual,
                 "fit_row": {"v_left": left, "v_right": right,
                             "duration": duration, "distance_m": visual_distance,
                             "yaw_delta_rad": visual_yaw},
@@ -266,6 +323,8 @@ class LiveCalibration:
 
     def run_arm(self, command):
         before = self.arm_feedback()
+        requested_command = command
+        command = resolve_arm_command(before, command)
         self._check_arm_limits(before, command)
         telemetry_before = self.drive_feedback()
         joints_before = pose_to_joints(self.model, before)
@@ -288,11 +347,19 @@ class LiveCalibration:
         time.sleep(float(self.config["sampling"].get("settle_s", 0.5)))
         after = self.arm_feedback()
         telemetry_after = self.drive_feedback()
-        dl, dr = firmware_distance_delta(
-            telemetry_before, telemetry_after,
-            self.model.ugv.parameters.firmware_odometry_unit)
-        if max(abs(dl), abs(dr)) > 0.005:
-            raise RuntimeError("UGV moved during arm-only trial")
+        has_encoder_odometry = firmware_odometry_available(
+            telemetry_before, telemetry_after)
+        if has_encoder_odometry:
+            dl, dr = firmware_distance_delta(
+                telemetry_before, telemetry_after,
+                self.model.ugv.parameters.firmware_odometry_unit)
+            if max(abs(dl), abs(dr)) > 0.005:
+                raise RuntimeError("UGV moved during arm-only trial")
+            wheel_delta = [dl, dr]
+            stationary_check = "VERIFIED_BY_FIRMWARE_ODOMETRY"
+        else:
+            wheel_delta = None
+            stationary_check = "COMMAND_STOP_ONLY_FIRMWARE_HAS_NO_ODOMETRY"
         joints_after = pose_to_joints(self.model, after)
         T_before = self.model.compute_camera_pose(np.zeros(3), joints_before)
         T_after = self.model.compute_camera_pose(np.zeros(3), joints_after)
@@ -301,13 +368,17 @@ class LiveCalibration:
         T_predicted = invert_transform(T_before).dot(T_after)
         vo = self.vo.estimate()
         T_visual = np.asarray(vo["T_C0_C1"], dtype=float)
-        return {"kind": "arm", "command": command, "reference": reference,
+        return {"kind": "arm", "command": command,
+                "requested_command": requested_command,
+                "reference": reference,
                 "visual_odometry": vo,
                 "model_vs_visual": comparison(T_predicted, T_visual),
                 "firmware_before": before, "firmware_after": after,
                 "T_BE_before": T_BE_before.tolist(),
                 "T_BE_after": T_BE_after.tolist(),
-                "ugv_wheel_delta_m": [dl, dr]}
+                "firmware_odometry_available": has_encoder_odometry,
+                "ugv_stationary_check": stationary_check,
+                "ugv_wheel_delta_m": wheel_delta}
 
     def run_commands(self, commands, output_path):
         if not self.execute:

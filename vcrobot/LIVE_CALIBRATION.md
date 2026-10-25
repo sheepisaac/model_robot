@@ -30,6 +30,11 @@ command list. Each UGV trial schedules a normal stop, repeats the stop in a
 Hard limits in the YAML reject oversized wheel commands, durations, arm steps,
 tool-angle steps, and arm speed.
 
+Live RoArm feedback is converted with the firmware-compatible IK path. This
+allows a measured pose already resting on a servo clamp to be represented by
+the model; post-command Cartesian feedback verification still rejects a target
+the physical arm did not reach.
+
 On a normal stopped shutdown the master requests a checked clean release, so
 the drive connection can close without the global `T=0` that also releases arm
 torque. The slave refuses that release if a job is pending or either wheel is
@@ -55,8 +60,11 @@ On the robot, update these existing control files from
 - `slave_arm.py`: adds a read-only Cartesian feedback request.
 
 Start the normal UGV and arm slaves exactly as before. Their default ports are
-50220 and 50210. The installed UGV firmware must be the ROS profile that emits
-`odl` and `odr` as cumulative integer centimetres.
+50220 and 50210. The ROS firmware emits `odl` and `odr` as cumulative integer
+centimetres. The General Driver's valid T=1001 response omits those fields;
+live calibration then records firmware encoder comparison as unavailable and
+uses L515 visual odometry as the metric UGV reference. It does not synthesize
+encoder measurements.
 
 Copy both files below to one directory on the Raspberry Pi:
 
@@ -144,6 +152,18 @@ commands:
   - "go 0.06 -0.06 0.8"
   - "10 0 100 3.0"
 ```
+
+For a safe incremental arm test that cannot become stale when watchdog or
+torque recovery changes the held pose, use fresh-feedback-relative syntax:
+
+```yaml
+commands:
+  - "arm_delta 0 0 10 0"  # current x/y/t, current z + 10 mm
+```
+
+The relative target is resolved only after reading arm feedback immediately
+before the trial, then passes through the same Cartesian-step, tool-angle,
+firmware IK, speed, and post-motion feedback checks as an absolute target.
 
 For a useful UGV fit, collect repeated straight, left-turn, and right-turn
 motions. For fixed-tool-angle eye-in-hand calibration, collect at least four

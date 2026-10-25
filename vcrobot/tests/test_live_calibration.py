@@ -12,7 +12,11 @@ for path in (ROOT, CALIBRATION):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from live_robot_calibration import parse_surface_command
+from live_robot_calibration import (firmware_distance_delta,
+                                    firmware_odometry_available,
+                                    parse_surface_command, pose_to_joints,
+                                    resolve_arm_command)
+from robot_models import IntegratedRobotCameraModel
 from rgbd_visual_odometry import (estimate_pose_from_correspondences,
                                   invert_transform)
 from slave_v4l2_odometry import V4L2_FOURCC, decode_frame, parse_distortion
@@ -22,14 +26,52 @@ class CommandParsingTests(unittest.TestCase):
     def test_controller_surface_syntax_is_classified(self):
         ugv = parse_surface_command("go 0.08 -0.06 1.2")
         arm = parse_surface_command("10 0 100 3")
+        relative = parse_surface_command("arm_delta 0 0 10 0")
         self.assertEqual(ugv["kind"], "ugv")
         self.assertAlmostEqual(ugv["duration"], 1.2)
         self.assertEqual(arm["kind"], "arm")
         self.assertEqual(arm["t"], 3.0)
+        self.assertEqual(relative["kind"], "arm_delta")
+        self.assertEqual(relative["dz"], 10.0)
+
+    def test_relative_arm_command_uses_fresh_feedback(self):
+        request = parse_surface_command("arm_delta 0 0 10 0")
+        resolved = resolve_arm_command(
+            {"x": 8.3344, "y": -0.0384, "z": 193.8203, "t": 3.4944},
+            request)
+        self.assertEqual(resolved["kind"], "arm")
+        self.assertAlmostEqual(resolved["x"], 8.3344)
+        self.assertAlmostEqual(resolved["z"], 203.8203)
+        self.assertAlmostEqual(resolved["t"], 3.4944)
+        self.assertEqual(resolved["relative_delta"]["dz"], 10.0)
 
     def test_ugv_duration_is_required(self):
         with self.assertRaises(ValueError):
             parse_surface_command("go 0.1 0.1")
+
+    def test_general_driver_feedback_explicitly_has_no_odometry(self):
+        general = {"T": 1001, "L": 0.0, "R": 0.0,
+                   "odometry_available": False}
+        ros_before = {"T": 1001, "odl": 10, "odr": 20,
+                      "odometry_available": True}
+        ros_after = {"T": 1001, "odl": 13, "odr": 18,
+                     "odometry_available": True}
+        self.assertFalse(firmware_odometry_available(general))
+        self.assertTrue(firmware_odometry_available(ros_before, ros_after))
+        self.assertEqual(firmware_distance_delta(
+            ros_before, ros_after, "cm"), (0.03, -0.02))
+
+    def test_live_feedback_on_firmware_clamp_is_modelled(self):
+        model = IntegratedRobotCameraModel.from_yaml(
+            ROOT / "configs" / "robot_calibration.template.yaml")
+        joints = pose_to_joints(model, {
+            "x": 42.56144571, "y": -0.195866703,
+            "z": 47.80462851, "t": 3.140058673,
+        })
+        self.assertTrue(model.roarm.check_joint_limits(joints))
+        achieved = model.roarm.firmware_pose(joints)
+        self.assertLess(np.linalg.norm(
+            achieved[:3] - [42.56144571, -0.195866703, 47.80462851]), 4.0)
 
 
 class RGBDOdometryTests(unittest.TestCase):
