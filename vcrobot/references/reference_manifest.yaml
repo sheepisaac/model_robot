@@ -30,10 +30,21 @@ references:
         sha256: 0FE3805CCD82DA45A3A93F16F81CFAA71739C2EE43CCC93C50148EB29DAD3566
       ROS_Driver/movtion_module.h:
         sha256: 9AC910191271EAA7E9C78D47FD1B83F7902492789374DA4122935903FD151D09
+      ROS_Driver/ugv_advance.h:
+        sha256: 954C91F416E706435BBC0B1A99993DE0AB8F005ECBDC9B420F8ED19463FCCF0E
+    inspected_contract:
+      ugv_rover_encoder_pulses_per_rev: 660
+      odl_odr_unit: integer_centimetres
   ugv_general_firmware:
     repository: https://github.com/waveshareteam/ugv_base_general
     revision: ARCHIVE_NO_GIT_METADATA
     local_path: ../../UGV02/ugv_base_general-main
+    key_files:
+      General_Driver/ugv_config.h:
+        sha256: 0AE6CF9C4D67DCA456B542CC39690BAC0E1CF3A24F15EA3578B51E30666427A1
+    inspected_contract:
+      ugv_rover_encoder_pulses_per_rev: 1650
+      odl_odr_unit: not_exposed_by_equivalent_json_contract
   librealsense:
     repository: https://github.com/realsenseai/librealsense
     revision: ARCHIVE_NO_GIT_METADATA

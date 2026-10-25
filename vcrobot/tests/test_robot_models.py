@@ -4,11 +4,12 @@ from pathlib import Path
 
 import numpy as np
 
-from calibration.calibrate_hand_eye import calibrate
+from calibration.calibrate_hand_eye import calibrate, calibration_residuals
 from autonbv.robot_model import AutoNBVRobotModel
-from robot_models import (CameraIntrinsics, IntegratedRobotCameraModel,
-                          L515CameraModel, RoArmModel, RobotCameraOdometry,
-                          UGVModel)
+from robot_models import (CameraIntrinsics, GripperCameraMount,
+                          IntegratedRobotCameraModel, L515CameraModel,
+                          RoArmModel, RobotCameraOdometry, UGVModel,
+                          UGVParameters)
 from robot_models.camera import deproject_pixel, project_point
 from robot_models.transforms import (invert_transform, make_transform,
                                      pose2d_transform, rotation_angle,
@@ -120,6 +121,18 @@ class UGVTests(unittest.TestCase):
         self.assertAlmostEqual(fitted.right_scale, truth_right, places=10)
         self.assertAlmostEqual(fitted.effective_track_width_m, truth_track, places=10)
 
+    def test_firmware_profiles_select_encoder_resolution_and_feedback_unit(self):
+        ros = UGVParameters.from_mapping({"firmware_profile": "ugv_base_ros"})
+        general = UGVParameters.from_mapping(
+            {"firmware_profile": "ugv_base_general"})
+        self.assertEqual(ros.encoder_pulses_per_rev, 660)
+        self.assertEqual(ros.firmware_odometry_unit, "cm")
+        self.assertEqual(general.encoder_pulses_per_rev, 1650)
+        self.assertIsNone(general.firmware_odometry_unit)
+        with self.assertRaises(ValueError):
+            UGVParameters.from_mapping({"firmware_profile": "ugv_base_ros",
+                                        "encoder_pulses_per_rev": 1650})
+
 
 class CameraTests(unittest.TestCase):
     def test_projection_roundtrip(self):
@@ -142,7 +155,7 @@ class IntegratedTests(unittest.TestCase):
     def model(status="UNCALIBRATED"):
         intrinsics = CameraIntrinsics(640, 480, 600, 600, 319.5, 239.5)
         return IntegratedRobotCameraModel(
-            RoArmModel(), UGVModel(), L515CameraModel(intrinsics),
+            RoArmModel(), UGVModel(), L515CameraModel(intrinsics, status),
             np.eye(4), np.eye(4), status, status)
 
     def test_pose_composition(self):
@@ -177,6 +190,46 @@ class IntegratedTests(unittest.TestCase):
         pose = adapter.camera_pose_from_joints([0, 0, 0],
                                                [0, 0, math.pi / 2, math.pi])
         self.assertEqual(pose.shape, (4, 4))
+
+    def test_moving_gripper_changes_camera_pose_with_t(self):
+        intrinsics = CameraIntrinsics(640, 480, 600, 600, 319.5, 239.5)
+        T_GC = make_transform(translation=[0.1, 0.0, 0.0])
+        mount = GripperCameraMount(
+            mode="revolute", T_GC=T_GC,
+            reference_t_rad=math.pi, axis=[0, 1, 0], radians_per_t=1.0,
+            motion_status="CALIBRATED", t_gc_status="CALIBRATED")
+        model = IntegratedRobotCameraModel(
+            RoArmModel(), UGVModel(),
+            L515CameraModel(intrinsics, "CALIBRATED"), np.eye(4),
+            t_ba_status="CALIBRATED", camera_mount=mount)
+        low_t = [0.0, 0.0, math.pi / 2.0, math.pi - 0.3]
+        high_t = [0.0, 0.0, math.pi / 2.0, math.pi + 0.3]
+        low_pose = model.compute_camera_pose([0, 0, 0], low_t)
+        high_pose = model.compute_camera_pose([0, 0, 0], high_t)
+        self.assertLess(high_pose[2, 3], low_pose[2, 3])
+        result = model.check_camera_view_reachability(low_pose)
+        self.assertTrue(result.reachable, result.reason)
+
+    def test_lookup_mount_requires_a_calibrated_t_sample(self):
+        first = np.eye(4)
+        second = make_transform(translation=[0.0, 0.0, -0.02])
+        mount = GripperCameraMount(
+            mode="lookup", T_GC=np.eye(4),
+            samples=[(2.0, first), (3.0, second)],
+            lookup_tolerance_rad=0.01,
+            motion_status="CALIBRATED", t_gc_status="CALIBRATED")
+        self.assertTrue(np.allclose(mount.gripper_transform(3.005), second))
+        with self.assertRaises(ValueError):
+            mount.gripper_transform(2.5)
+
+    def test_intrinsics_are_part_of_integrated_calibration_state(self):
+        intrinsics = CameraIntrinsics(640, 480, 600, 600, 319.5, 239.5)
+        model = IntegratedRobotCameraModel(
+            RoArmModel(), UGVModel(), L515CameraModel(intrinsics),
+            np.eye(4), np.eye(4), "CALIBRATED", "CALIBRATED")
+        self.assertFalse(model.calibrated)
+        self.assertEqual(model.calibration_status["l515_intrinsics"],
+                         "UNCALIBRATED")
 
 
 class OdometryTests(unittest.TestCase):
@@ -217,16 +270,25 @@ class OdometryTests(unittest.TestCase):
         self.assertAlmostEqual(update.base_delta_body[1], 0.0)
         self.assertAlmostEqual(update.base_delta_body[2], 0.0)
 
-    def test_firmware_odl_odr_and_xyzt_feedback(self):
-        odometry = self.odometry()
+    def test_firmware_odl_odr_centimetres_and_xyzt_feedback(self):
+        intrinsics = CameraIntrinsics(640, 480, 600, 600, 319.5, 239.5)
+        parameters = UGVParameters.from_mapping({
+            "firmware_profile": "ugv_base_ros", "calibrated": True})
+        model = IntegratedRobotCameraModel(
+            RoArmModel(), UGVModel(parameters),
+            L515CameraModel(intrinsics, "CALIBRATED"),
+            np.eye(4), np.eye(4), "CALIBRATED", "CALIBRATED")
+        odometry = RobotCameraOdometry(
+            model, [0.0, 0.0, 0.0],
+            [0.0, 0.0, math.pi / 2.0, math.pi])
         self.assertIsNone(
-            odometry.update_cumulative_wheel_distances(2.0, 3.0))
+            odometry.update_firmware_odometry(200, 300))
         target_joints = np.array([0.1, -0.1, 0.8, math.pi])
         x, y, z, t = odometry.model.roarm.firmware_pose(target_joints)
-        update = odometry.update_cumulative_wheel_distances(
-            2.1, 3.1, arm_pose={"x": x, "y": y, "z": z, "t": t})
+        update = odometry.update_firmware_odometry(
+            210, 310, arm_pose={"x": x, "y": y, "z": z, "t": t})
         self.assertAlmostEqual(update.base_delta_body[0], 0.1)
-        self.assertEqual(update.sources["base"], "wheel_distance")
+        self.assertEqual(update.sources["base"], "firmware_odometry_cm")
         self.assertEqual(update.sources["arm"], "xyzt_ik")
         achieved = odometry.model.roarm.firmware_pose(update.joint_angles_after)
         self.assertLess(np.linalg.norm(achieved[:3] - [x, y, z]), 4.0)
@@ -253,6 +315,9 @@ class CalibrationTests(unittest.TestCase):
         estimate, _ = calibrate(samples)
         self.assertLess(np.linalg.norm(estimate[:3, 3] - truth[:3, 3]), 1e-10)
         self.assertLess(rotation_angle(estimate[:3, :3], truth[:3, :3]), 1e-10)
+        residuals = calibration_residuals(samples, estimate)
+        self.assertLess(residuals["translation_rmse_m"], 1e-10)
+        self.assertLess(residuals["rotation_rmse_deg"], 1e-8)
 
 
 if __name__ == "__main__":

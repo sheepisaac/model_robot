@@ -30,6 +30,13 @@ def validate(path):
                                "z_mm": firmware_pose[2],
                                "t": firmware_pose[3]})
     return {"calibrated": model.calibrated,
+            "calibration_status": model.calibration_status,
+            "camera_mount_mode": model.camera_mount.mode,
+            "ugv_firmware_profile": model.ugv.parameters.firmware_profile,
+            "ugv_firmware_odometry_unit":
+            model.ugv.parameters.firmware_odometry_unit,
+            "ugv_encoder_pulses_per_rev":
+            model.ugv.parameters.encoder_pulses_per_rev,
             "transform_inverse_max_error": inverse_error,
             "fk_ik_success": ik.success,
             "fk_ik_reason": ik.reason,

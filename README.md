@@ -69,18 +69,21 @@ The model therefore connects the following pieces:
 - Reachability and motion-cost information needed by the NBV planner
 - A simulation-only OpenCV demo that never sends commands to physical motors
 
-The central camera-pose composition is:
+Because the L515 is mounted on the moving gripper member, the central
+camera-pose composition is:
 
 ```text
-T_WC = T_WB · T_BA · T_AE(q) · T_EC
+T_WC = T_WB · T_BA · T_AE(q) · T_EG(t) · T_GC
 ```
 
 - `W`: world frame
 - `B`: UGV body frame
 - `A`: RoArm firmware Cartesian frame
 - `E`: modeled end-effector frame
+- `G`: moving gripper-member frame
 - `C`: L515 optical frame
 - `q`: arm joint state
+- `t`: fourth RoArm command value controlling the moving gripper member
 
 Core translations use metres and angles use radians. See
 [vcrobot/ROBOT_MODELING.md](vcrobot/ROBOT_MODELING.md) for the complete frame
@@ -108,7 +111,10 @@ also recorded in `vcrobot/references/reference_manifest.yaml`.
 The `vcrobot` package currently provides:
 
 - A differential-drive approximation and encoder odometry for the UGV
+- Explicit UGV firmware profiles for the 660-count ROS driver and 1650-count
+  general driver; ROS `odl`/`odr` feedback is converted from centimetres
 - RoArm forward/inverse kinematics, workspace checks, and joint-limit checks
+- A separate `t`-dependent moving-gripper camera mount model
 - Integrated UGV-arm-camera transforms and camera-motion accounting
 - An L515 projection/deprojection camera model
 - YAML-based nominal and calibrated parameter management
@@ -119,8 +125,8 @@ The `vcrobot` package currently provides:
 The OpenCV demo also reflects the physical modifications described during
 development:
 
-- The gripper is shown in its 90-degree-rotated vertical mounting rather than
-  the stock lateral opening direction.
+- The gripper and camera are modeled in their 90-degree-rotated vertical
+  mounting rather than the stock lateral opening direction.
 - Smaller `t` values move the gripper proxy upward; larger values move it
   downward.
 - The arm is rendered in 3D together with the world axes.
@@ -128,6 +134,11 @@ development:
   this affects visualization only, not the model coordinate system.
 - Firmware-compatible commands may be clamped in the demo, while strict IK is
   still used for NBV planning and reachability decisions.
+
+The template's continuous gripper motion is deliberately marked
+`UNCALIBRATED`. The magnified +/-45-degree OpenCV indicator is a display proxy,
+not a physical camera model. Measured discrete `t -> T_EG` transforms can be
+used in lookup mode until experiments justify a continuous mapping.
 
 ![OpenCV integrated motion-model demo](vcrobot/opencv_motion_demo_preview.png)
 
@@ -247,8 +258,11 @@ The template configuration is not sufficient for precise NBV operation or
 collision safety. At minimum, measure and validate:
 
 - [ ] `T_BA`: UGV body frame to the RoArm firmware frame
-- [ ] `T_EC`: RoArm modeled end frame to the L515 optical frame
+- [ ] `T_EG(t)`: RoArm end frame to the moving gripper member for measured `t`
+- [ ] `T_GC`: moving gripper-member frame to the L515 optical frame
 - [ ] L515 intrinsics and distortion for every active stream resolution
+- [ ] Installed UGV firmware profile: 660-count ROS driver or 1650-count
+  general driver
 - [ ] Wheel distance-per-count, left/right scale, and effective track width
 - [ ] Skid-steer turning error under representative floor conditions
 - [ ] Time synchronization among commands, encoders, joint feedback, and frames
@@ -265,7 +279,8 @@ capable autonomous acquisition:
 
 - [x] Nominal UGV-RoArm-L515 model and odometry foundation
 - [x] Interactive OpenCV 3D simulation and regression tests
-- [ ] Calibrate physical parameters and compare predictions with robot logs
+- [ ] Calibrate `T_BA`, `T_EG(t)`, `T_GC`, intrinsics, and UGV motion parameters
+  and compare predictions with robot logs
 - [ ] Implement a first NBV loop using 8-16 discrete viewpoint candidates
 - [ ] Apply an **Arm-first, Base-assisted** policy: prefer arm-only views and
   move the UGV only when the arm cannot reach a useful view

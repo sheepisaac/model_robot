@@ -1,4 +1,8 @@
-"""Estimate eye-in-hand T_EC with OpenCV and reject weak motion sets."""
+"""Estimate fixed-t eye-in-hand T_EC and reject weak motion sets.
+
+For the moving-camera gripper this is an intermediate calibration result.
+Deriving T_GC additionally requires a calibrated T_EG at the fixed t value.
+"""
 
 import argparse
 import math
@@ -13,7 +17,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from robot_models.transforms import transform_to_config, validate_transform
+from robot_models.transforms import (rotation_angle, transform_to_config,
+                                     validate_transform)
 
 
 def _rotation_vector(rotation):
@@ -55,19 +60,61 @@ def calibrate(samples):
     return validate_transform(T_EC), singular
 
 
+def calibration_residuals(samples, T_EC):
+    """Measure fixed-target consistency after hand-eye calibration.
+
+    For each sample, ``T_BG @ T_EC @ T_CT`` should produce the same target
+    pose in the base frame.  The returned residuals validate the result; they
+    are separate from the numerical calibration itself.
+    """
+    T_EC = validate_transform(np.asarray(T_EC, dtype=float))
+    target_poses = []
+    for item in samples:
+        T_BG = validate_transform(np.asarray(item["T_BG"], dtype=float))
+        T_CT = validate_transform(np.asarray(item["T_CT"], dtype=float))
+        target_poses.append(T_BG.dot(T_EC).dot(T_CT))
+    translations = np.vstack([item[:3, 3] for item in target_poses])
+    translation_center = np.mean(translations, axis=0)
+    translation_errors = np.linalg.norm(
+        translations - translation_center, axis=1)
+    reference_rotation = target_poses[0][:3, :3]
+    rotation_errors = np.array([
+        rotation_angle(reference_rotation, item[:3, :3])
+        for item in target_poses])
+    return {
+        "translation_rmse_m": float(np.sqrt(np.mean(translation_errors ** 2))),
+        "translation_max_m": float(np.max(translation_errors)),
+        "rotation_rmse_deg": float(math.degrees(
+            np.sqrt(np.mean(rotation_errors ** 2)))),
+        "rotation_max_deg": float(math.degrees(np.max(rotation_errors))),
+    }
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("input_yaml")
     parser.add_argument("output_yaml")
+    parser.add_argument("--max-translation-rmse-m", type=float, default=0.01)
+    parser.add_argument("--max-rotation-rmse-deg", type=float, default=2.0)
     args = parser.parse_args(argv)
     with Path(args.input_yaml).open("r", encoding="utf-8") as handle:
         config = yaml.safe_load(handle)
     result, singular = calibrate(config["hand_eye"]["samples"])
-    output = {"extrinsics": {"T_EC": {"status": "CALIBRATED",
-                                        "matrix": transform_to_config(result),
-                                        "source": str(args.input_yaml),
-                                        "rotation_singular_values":
-                                        [float(item) for item in singular]}}}
+    residuals = calibration_residuals(config["hand_eye"]["samples"], result)
+    accepted = (
+        residuals["translation_rmse_m"] <= args.max_translation_rmse_m and
+        residuals["rotation_rmse_deg"] <= args.max_rotation_rmse_deg)
+    output = {"extrinsics": {"T_EC_at_fixed_t": {
+        "status": "CALIBRATED" if accepted else "REJECTED",
+        "matrix": transform_to_config(result),
+        "source": str(args.input_yaml),
+        "fixed_t_rad": config["hand_eye"].get("fixed_t_rad"),
+        "rotation_singular_values": [float(item) for item in singular],
+        "validation": residuals,
+        "thresholds": {
+            "max_translation_rmse_m": args.max_translation_rmse_m,
+            "max_rotation_rmse_deg": args.max_rotation_rmse_deg,
+        }}}}
     with Path(args.output_yaml).open("w", encoding="utf-8") as handle:
         yaml.safe_dump(output, handle, sort_keys=False)
 

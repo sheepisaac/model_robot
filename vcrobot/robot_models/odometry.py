@@ -180,8 +180,15 @@ class RobotCameraOdometry:
 
     def update_cumulative_wheel_distances(self, left_m: float, right_m: float,
                                           joint_angles=None, arm_pose=None):
-        """Update from firmware `odl`/`odr` cumulative metre feedback."""
+        """Update from cumulative physical wheel distances in metres.
+
+        Do not pass the Waveshare ROS firmware's raw ``odl``/``odr`` fields to
+        this method: those fields are integer centimetres.  Use
+        :meth:`update_firmware_odometry` for raw firmware feedback.
+        """
         current = np.array([float(left_m), float(right_m)])
+        if not np.all(np.isfinite(current)):
+            raise ValueError("cumulative wheel distances must be finite")
         if self._wheel_distances is None:
             self._wheel_distances = current
             return None
@@ -189,6 +196,36 @@ class RobotCameraOdometry:
         self._wheel_distances = current
         return self.update_wheel_distances(
             delta[0], delta[1], joint_angles=joint_angles, arm_pose=arm_pose)
+
+    def update_firmware_odometry(self, odl, odr, joint_angles=None,
+                                 arm_pose=None):
+        """Update from raw cumulative ``odl``/``odr`` firmware fields.
+
+        The supplied ``ugv_base_ros`` firmware publishes these values as
+        integer centimetres (``long(en_odom_* * 100)``).  Other firmware
+        profiles must declare their unit explicitly; an unknown contract is
+        rejected rather than silently interpreted as metres.
+        """
+        unit = self.model.ugv.parameters.firmware_odometry_unit
+        if unit is None:
+            raise ValueError(
+                "UGV firmware odometry unit is unknown; select a verified "
+                "firmware_profile or configure firmware_odometry_unit")
+        scale = {"m": 1.0, "cm": 0.01}[unit]
+        update = self.update_cumulative_wheel_distances(
+            float(odl) * scale, float(odr) * scale,
+            joint_angles=joint_angles, arm_pose=arm_pose)
+        if update is None:
+            return None
+        sources = dict(update.sources)
+        sources["base"] = "firmware_odometry_{}".format(unit)
+        return OdometryUpdate(
+            update.base_pose_before, update.base_pose_after,
+            update.base_delta_body, update.joint_angles_before,
+            update.joint_angles_after, update.joint_delta,
+            update.camera_pose_before, update.camera_pose_after,
+            update.camera_from_base, update.camera_from_arm,
+            update.camera_total, sources, update.calibrated)
 
     @staticmethod
     def _arm_source(joint_angles, arm_pose):

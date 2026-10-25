@@ -1,6 +1,8 @@
-schema_version: 1
+schema_version: 2
 
 hand_eye:
+  # Keep the moving gripper at this exact t for every hand-eye sample.
+  fixed_t_rad: 3.141592653589793
   # Fixed target, eye-in-hand convention used by OpenCV calibrateHandEye.
   # Each T_BG maps gripper/end coordinates to robot base coordinates.
   # Each T_CT maps calibration-target coordinates to camera coordinates.
@@ -8,7 +10,16 @@ hand_eye:
     - id: pose_000
       T_BG: [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]
       T_CT: [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]
-  output_transform: T_EC
+  # This first estimates T_EC at fixed t. T_GC can be derived only after the
+  # gripper motion T_EG(t) has also been calibrated.
+  output_transform: T_EC_at_fixed_t
+
+gripper_camera_lookup:
+  # Record measured T_EG transforms at 3-5 or more fixed t values. These
+  # samples can be copied into gripper_camera.samples in the robot config.
+  samples:
+    - t_rad: 2.0
+      T_EG: [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]
 
 ugv_motion_csv:
   required_columns:

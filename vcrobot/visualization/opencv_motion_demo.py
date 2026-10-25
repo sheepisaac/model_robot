@@ -137,11 +137,19 @@ class MotionDemo:
         palm = end - 0.020 * tool_x
         segments = [(palm, end, (70, 190, 235))]
         if self.gripper_orientation == "vertical":
-            angle = math.radians(self._gripper_angle_deg())
-            moving_direction = math.cos(angle) * tool_x + math.sin(angle) * tool_z
             segments.append((end, end + 0.065 * tool_x, (180, 190, 200)))
-            segments.append((end, end + 0.065 * moving_direction,
-                             (60, 235, 235)))
+            if self.model.camera_mount.dynamic:
+                # The model transform, not the +/-45 degree display proxy,
+                # determines the moving member and L515 location.
+                camera = T_WE.dot(self.model.camera_mount.camera_transform(
+                    self.odometry.joint_angles[3]))
+                segments.append((end, camera[:3, 3], (60, 235, 235)))
+            else:
+                angle = math.radians(self._gripper_angle_deg())
+                moving_direction = (math.cos(angle) * tool_x +
+                                    math.sin(angle) * tool_z)
+                segments.append((end, end + 0.065 * moving_direction,
+                                 (60, 235, 235)))
         else:
             gap = 0.010 + (1.0 - self._gripper_fraction()) * 0.070
             bases = np.array([palm - 0.5 * gap * tool_y,
@@ -413,7 +421,7 @@ class MotionDemo:
         inset = (x1 - 145, y0 + 34, x1 - 12, y0 + 145)
         ix0, iy0, ix1, iy1 = inset
         cv2.rectangle(image, (ix0, iy0), (ix1, iy1), (75, 82, 89), 1)
-        _put_text(image, "GRIPPER PROXY", (ix0 + 7, iy0 + 18), 0.36,
+        _put_text(image, "GRIPPER DISPLAY", (ix0 + 7, iy0 + 18), 0.36,
                   (70, 225, 235))
         center_y = (iy0 + iy1) // 2 + 8
         palm_x = ix0 + 25
@@ -464,6 +472,9 @@ class MotionDemo:
             "gripper     t {:+.3f} rad  lateral {:.0f}%".format(
                 q[3], 100.0 * self._gripper_fraction()),
             "camera m    x {:+.3f}  y {:+.3f}  z {:+.3f}".format(*camera),
+            "mount       {} / {}".format(
+                self.model.camera_mount.mode,
+                self.model.camera_mount.motion_status),
         ]
         if self.last_update is not None:
             delta = self.last_update

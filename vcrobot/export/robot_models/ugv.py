@@ -2,19 +2,80 @@
 
 from dataclasses import dataclass
 import math
-from typing import Iterable, Mapping, Optional, Sequence
+from typing import ClassVar, Iterable, Mapping, Optional, Sequence
 
 import numpy as np
 
 
 @dataclass(frozen=True)
 class UGVParameters:
+    FIRMWARE_PROFILES: ClassVar[Mapping[str, Mapping[str, object]]] = {
+        # UGV Rover (mainType=2) values in the supplied Waveshare archives.
+        # ugv_base_ros publishes JSON odl/odr as integer centimetres.
+        "ugv_base_ros": {
+            "encoder_pulses_per_rev": 660,
+            "firmware_odometry_unit": "cm",
+        },
+        # The general driver archive uses a different encoder resolution and
+        # does not expose the same odl/odr JSON contract.
+        "ugv_base_general": {
+            "encoder_pulses_per_rev": 1650,
+            "firmware_odometry_unit": None,
+        },
+    }
+
     wheel_diameter_m: float = 0.0800
     encoder_pulses_per_rev: int = 660
     effective_track_width_m: float = 0.172
     left_scale: float = 1.0
     right_scale: float = 1.0
+    firmware_profile: str = "custom"
+    firmware_odometry_unit: Optional[str] = None
     calibrated: bool = False
+
+    def __post_init__(self):
+        if self.wheel_diameter_m <= 0.0:
+            raise ValueError("wheel_diameter_m must be positive")
+        if int(self.encoder_pulses_per_rev) <= 0:
+            raise ValueError("encoder_pulses_per_rev must be positive")
+        if self.firmware_odometry_unit not in (None, "m", "cm"):
+            raise ValueError("firmware_odometry_unit must be m, cm, or null")
+
+    @classmethod
+    def from_mapping(cls, value):
+        value = dict(value or {})
+        profile = str(value.get("firmware_profile", "custom")).lower()
+        defaults = cls.FIRMWARE_PROFILES.get(profile, {})
+        if profile != "custom" and not defaults:
+            raise ValueError("unknown UGV firmware_profile: {}".format(profile))
+        pulses = int(value.get(
+            "encoder_pulses_per_rev",
+            defaults.get("encoder_pulses_per_rev", cls.encoder_pulses_per_rev)))
+        feedback_unit = value.get(
+            "firmware_odometry_unit",
+            defaults.get("firmware_odometry_unit", None))
+        if defaults:
+            expected_pulses = int(defaults["encoder_pulses_per_rev"])
+            if pulses != expected_pulses:
+                raise ValueError(
+                    "firmware profile {} requires {} encoder pulses/rev, got {}"
+                    .format(profile, expected_pulses, pulses))
+            expected_unit = defaults["firmware_odometry_unit"]
+            if feedback_unit != expected_unit:
+                raise ValueError(
+                    "firmware profile {} requires odometry unit {}, got {}"
+                    .format(profile, expected_unit, feedback_unit))
+        return cls(
+            wheel_diameter_m=float(value.get("wheel_diameter_m", 0.0800)),
+            encoder_pulses_per_rev=pulses,
+            effective_track_width_m=float(value.get(
+                "effective_track_width_m", 0.172)),
+            left_scale=float(value.get("left_scale", 1.0)),
+            right_scale=float(value.get("right_scale", 1.0)),
+            firmware_profile=profile,
+            firmware_odometry_unit=feedback_unit,
+            calibrated=bool(value.get("calibrated", False)),
+        )
 
 
 class UGVModel:
@@ -91,7 +152,10 @@ class UGVModel:
             wheel_diameter_m=p.wheel_diameter_m,
             encoder_pulses_per_rev=p.encoder_pulses_per_rev,
             effective_track_width_m=p.effective_track_width_m,
-            left_scale=1.0, right_scale=1.0, calibrated=p.calibrated))
+            left_scale=1.0, right_scale=1.0,
+            firmware_profile=p.firmware_profile,
+            firmware_odometry_unit=p.firmware_odometry_unit,
+            calibrated=p.calibrated))
         return temporary.predict_motion(state, left_distance, right_distance, duration)
 
     def encoder_counts_to_distance(self, counts: float) -> float:

@@ -10,7 +10,7 @@ All core translations are metres and angles are radians. `T_XY` maps a point
 from frame Y into frame X, using column-vector composition:
 
 ```text
-T_WC = T_WB @ T_BA @ T_AE(q) @ T_EC
+T_WC = T_WB @ T_BA @ T_AE(q) @ T_EG(t) @ T_GC
 ```
 
 - W: world/map frame, X forward, Y left, Z up.
@@ -18,6 +18,7 @@ T_WC = T_WB @ T_BA @ T_AE(q) @ T_EC
 - A: RoArm firmware Cartesian frame. Its origin is on the yaw axis at shoulder
   height; X is forward at base angle zero, Y is left, Z is up.
 - E: modeled distal/tool frame.
+- G: moving member of the user's vertically mounted gripper.
 - C: L515 optical frame, X right, Y down, Z forward.
 
 The firmware frame A is not the ROS URDF `base_link`. The URDF places the base
@@ -38,11 +39,23 @@ that its IK uses; tests retain a 4 mm tolerance rather than hiding this source
 inconsistency. In EEMode 0 the fourth servo is a gripper, so arbitrary camera
 orientation is not independently controllable.
 
-UGV nominal values come from `ugv_config.h`: 80 mm wheel diameter, 660 encoder
-pulses/rev and 172 mm track width for `mainType=2` (UGV Rover). `T=1` L/R
+UGV nominal values come from `ugv_config.h`: 80 mm wheel diameter and 172 mm
+track width for `mainType=2` (UGV Rover). Encoder resolution is firmware
+dependent: the supplied `ugv_base_ros` archive uses 660 pulses/rev, while
+`ugv_base_general` uses 1650. The ROS firmware publishes cumulative `odl` and
+`odr` as integer centimetres, not metres. The selected YAML firmware profile
+controls both interpretations and rejects contradictory values. `T=1` L/R
 commands feed the wheel-speed PID in m/s. The six-wheel skid-steer chassis is
 only approximated as a differential drive; effective track width and left/right
 scale factors remain uncalibrated until fitted from repeated motion logs.
+
+The L515 is attached to the moving gripper member, not the fixed end body.
+Consequently EEMode-0 `t` changes camera pose through `T_EG(t) @ T_GC`, while
+the firmware-compatible arm FK remains unchanged. The template contains an
+explicitly UNCALIBRATED one-axis nominal model in which larger `t` moves the
+camera downward. It also supports discrete measured `t -> T_EG` samples. The
+OpenCV +/-45-degree inset remains only a display proxy and is not used by the
+mathematical camera-pose model.
 
 L515 projection uses the librealsense optical convention. Device-specific
 intrinsics, distortion coefficients, depth scale and depth-to-colour extrinsics
@@ -67,9 +80,10 @@ T_WC = model.compute_camera_pose(
 ```
 
 The template loads for simulation, but `check_camera_view_reachability()`
-refuses to make a hardware-safety claim until both extrinsics are explicitly
-marked `CALIBRATED`. The autoNBV bridge in `autonbv/robot_model.py` converts a
-validated camera target back to the existing vcrobot `x,y,z,t` command format.
+refuses to make a hardware-safety claim until `T_BA`, gripper motion, `T_GC`,
+and L515 intrinsics are explicitly marked `CALIBRATED`. The autoNBV bridge in
+`autonbv/robot_model.py` converts a validated camera target back to the
+existing vcrobot `x,y,z,t` command format.
 
 ## Incremental odometry and camera motion
 
@@ -92,10 +106,10 @@ odometry = RobotCameraOdometry(
     joint_angles=[0.0, 0.0, np.pi / 2.0, np.pi],
 )
 
-# vcrobot UGV feedback publishes cumulative left/right travel as odl/odr (m).
+# ugv_base_ros publishes cumulative left/right travel as integer cm in odl/odr.
 # The first sample establishes a baseline and therefore returns None.
-odometry.update_cumulative_wheel_distances(odl, odr)
-update = odometry.update_cumulative_wheel_distances(
+odometry.update_firmware_odometry(odl, odr)
+update = odometry.update_firmware_odometry(
     next_odl, next_odr,
     arm_pose={"x": x_mm, "y": y_mm, "z": z_mm, "t": t_rad},
 )
@@ -107,18 +121,21 @@ print(update.camera_from_arm.distance_m)   # isolated arm contribution
 print(update.camera_total.rotation_rad)    # actual combined camera change
 ```
 
-`update_encoder_counts()` accepts cumulative raw wheel counts instead.
-`update_wheel_velocity()` accepts left/right m/s and a time interval, while
-`update_absolute()` can consume an externally estimated UGV pose. RoArm
-feedback can be supplied either as four joint radians or the existing vcrobot
-firmware `x,y,z,t` values; XYZT is converted back through the firmware IK.
+`update_cumulative_wheel_distances()` remains available for values that are
+already in metres. `update_encoder_counts()` accepts cumulative raw wheel
+counts using the selected firmware profile. `update_wheel_velocity()` accepts
+left/right m/s and a time interval, while `update_absolute()` can consume an
+externally estimated UGV pose. RoArm feedback can be supplied either as four
+joint radians or the existing vcrobot firmware `x,y,z,t` values; XYZT is
+converted back through the firmware IK.
 
 This is wheel/kinematic odometry, not an absolute localization system. It will
 accumulate skid, wheel slip, encoder scale and timing errors. The isolated and
 total camera relative transforms are expressed in the previous camera frame.
 Their numerical accuracy also depends on synchronized feedback and calibrated
-`T_BA`, `T_EC`, wheel scales and effective track width. The report's
-`calibrated` field remains false until both extrinsics are marked calibrated.
+`T_BA`, `T_EG(t)`, `T_GC`, L515 intrinsics, wheel scales and effective track
+width. The camera report's `calibrated` field remains false until every
+camera-pose component is marked calibrated.
 
 ## OpenCV interactive motion demo
 
@@ -146,7 +163,9 @@ Click the window before typing. The top view follows the UGV and shows the UGV,
 arm, a gripper-motion proxy, L515 optical direction and motion trails. The demo
 defaults to the user's 90-degree rotated gripper mounting: small EEMode-0 `t`
 values move the yellow member upward and large `t` values move it downward.
-The currently unmeasured travel is rendered as a linear +/-45-degree proxy.
+The currently unmeasured travel is rendered in the magnified inset as a linear
++/-45-degree display proxy. Camera position and the moving 3D member use the
+separate nominal `T_EG(t) @ T_GC` model and remain marked UNCALIBRATED.
 The right panel is
 an OpenCV-rendered orthographic 3D world view with an XYZ ground grid, UGV
 cuboid, arm links, gripper and L515 optical axis. Live telemetry includes UGV pose, joints,
@@ -159,9 +178,9 @@ different view can be selected with `--view-azimuth-deg DEGREES`.
 To compare against the stock lateral mounting, run with
 `--gripper-orientation lateral`. Once measured endpoint angles are available,
 replace the default proxy range with `--gripper-sweep-deg DEGREES`.
-This changes the displayed gripper member only; `T_EC` remains a fixed
-tool-to-camera transform. If the L515 is physically attached to that moving
-member, its `t`-dependent camera transform must be calibrated separately.
+The physical `T_EG(t)` motion and fixed moving-member-to-camera transform
+`T_GC` must be calibrated separately. For an initial discrete NBV system,
+`gripper_camera.mode: lookup` can restrict the model to measured `t` samples.
 
 The real firmware accepts some Cartesian targets whose IK angles exceed a
 servo range and silently clamps the servo command. The demo mirrors that
@@ -187,7 +206,7 @@ python3 calibration/validate_robot_model.py \
   configs/robot_calibration.template.yaml
 python3 visualization/visualize_robot.py \
   configs/robot_calibration.template.yaml --output robot_model.png
-python3 scripts/export_robot_models.py
+python3 scripts/export_robot_models.py --calibration path/to/calibrated.yaml
 ```
 
 The export contains only `robot_models`, NumPy/PyYAML-compatible code and a
@@ -197,12 +216,18 @@ physical device dependency.
 ## Remaining measurements
 
 1. Confirm the installed RoArm firmware revision and active EEMode.
-2. Measure/calibrate `T_BA` for the actual UGV mount.
-3. Calibrate `T_EC` with diverse poses; the provided script rejects weak
-   rotation sets, which are a real risk for this 4-DOF arm.
-4. Export L515 colour/depth intrinsics, distortion, depth scale and stream
+2. Confirm the installed UGV firmware profile (660-count ROS or 1650-count
+   general driver) before consuming raw encoder counts.
+3. Measure/calibrate `T_BA` for the actual UGV mount.
+4. Hold `t` fixed and estimate the corresponding hand-eye transform; the
+   calibration tool reports target-pose residuals as well as observability.
+5. Measure at least 3-5 gripper positions to calibrate `T_EG(t)` and `T_GC`,
+   using discrete lookup samples until a continuous mechanism model is
+   justified by data.
+6. Export L515 colour/depth intrinsics, distortion, depth scale and stream
    extrinsics from the connected device.
-5. Fit UGV left/right speed scales and effective track width using repeated
+7. Fit UGV left/right speed scales and effective track width using repeated
    straight, reverse and turning trials with an external pose reference.
-6. Verify camera/arm clearance and collision envelopes on the physical robot;
+8. Verify camera/arm clearance, cable tension, payload sag and collision
+   envelopes on the physical robot;
    the plot uses proxy geometry and is not a collision checker.

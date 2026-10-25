@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 
 # This file is deliberately NOT hardware-ready.  Replace every
 # UNCALIBRATED field from measurements before enabling physical view planning.
@@ -7,8 +7,14 @@ roarm:
   firmware_source: RoArm-M2_config.h
 
 ugv:
+  # Select the profile that matches the firmware installed on the robot.
+  # Supplied UGV Rover archives:
+  #   ugv_base_ros     -> 660 counts/rev; JSON odl/odr are integer cm
+  #   ugv_base_general -> 1650 counts/rev; no equivalent odl/odr contract
+  firmware_profile: ugv_base_ros
   wheel_diameter_m: 0.0800
   encoder_pulses_per_rev: 660
+  firmware_odometry_unit: cm
   effective_track_width_m: 0.172
   left_scale: 1.0
   right_scale: 1.0
@@ -28,12 +34,33 @@ l515:
 extrinsics:
   # T_XY maps coordinates from frame Y into frame X.
   # B: UGV body, A: RoArm firmware Cartesian frame,
-  # E: modeled arm end, C: L515 optical frame (+X right,+Y down,+Z forward).
+  # E: modeled arm end, G: moving gripper member,
+  # C: L515 optical frame (+X right,+Y down,+Z forward).
   T_BA:
     status: UNCALIBRATED
     translation_m: [0.0, 0.0, 0.0]
     rpy_deg: [0.0, 0.0, 0.0]
-  T_EC:
+  T_GC:
     status: UNCALIBRATED
+    # Nominal visualization offset only. Replace with a measured transform.
+    translation_m: [0.065, 0.0, 0.0]
+    rpy_deg: [0.0, 0.0, 0.0]
+
+gripper_camera:
+  # The L515 is mounted on the moving gripper member. This nominal revolute
+  # model makes larger t move the camera downward in the E-frame convention.
+  # It is not the +/-45-degree visualization proxy and is not calibrated.
+  mode: revolute
+  status: UNCALIBRATED
+  reference_t_rad: 3.141592653589793
+  axis: [0.0, 1.0, 0.0]
+  radians_per_t: 1.0
+  T_EG_reference:
     translation_m: [0.0, 0.0, 0.0]
     rpy_deg: [0.0, 0.0, 0.0]
+  # For discrete calibration, set mode: lookup and replace the fields above
+  # with samples such as:
+  # samples:
+  #   - t_rad: 2.0
+  #     T_EG: {translation_m: [x, y, z], rpy_deg: [r, p, y]}
+  lookup_tolerance_rad: 0.001

@@ -105,9 +105,15 @@ def transform_depth_to_color(point, extrinsics) -> np.ndarray:
 class L515CameraModel:
     """Projection wrapper; no librealsense or physical camera is required."""
 
-    def __init__(self, intrinsics: CameraIntrinsics):
+    def __init__(self, intrinsics: CameraIntrinsics,
+                 status: str = "UNCALIBRATED"):
         validate_camera_intrinsics(intrinsics)
         self.intrinsics = intrinsics
+        self.status = str(status).upper()
+
+    @property
+    def calibrated(self) -> bool:
+        return self.status == "CALIBRATED"
 
     def project(self, point_3d):
         return project_point(point_3d, self.intrinsics)
