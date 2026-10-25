@@ -79,6 +79,10 @@ depth on `/dev/video2`, packed confidence on `/dev/video4`, and YUYV colour on
 `/dev/video6`. The V4L2 service deliberately uses IR plus depth, so it does not
 need colour-to-depth alignment:
 
+The depth FourCC is `'Z16 '` with a significant trailing space. The service
+passes its unambiguous numeric representation `0x2036315a` to `v4l2-ctl`;
+plain `pixelformat=Z16` is rejected by this driver.
+
 ```bash
 sudo apt install -y v4l-utils python3-numpy python3-opencv
 

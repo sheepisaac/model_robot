@@ -33,6 +33,13 @@ from rgbd_visual_odometry import RGBDVisualOdometry
 
 
 PROTOCOL_VERSION = 1
+V4L2_FOURCC = {
+    "GREY": "GREY",
+    # The actual four-character code is 'Z16 ' including a trailing space.
+    # Use its numeric little-endian representation so neither a shell nor
+    # v4l2-ctl's option parser can discard that significant space.
+    "Z16": "0x2036315a",
+}
 
 
 def parse_distortion(value):
@@ -104,7 +111,7 @@ class RawV4L2Stream:
             "--device", self.device,
             "--set-fmt-video",
             (f"width={self.width},height={self.height},"
-             f"pixelformat={self.pixel_format}"),
+             f"pixelformat={V4L2_FOURCC[self.pixel_format]}"),
             "--set-parm", fps_text,
             "--stream-mmap=4",
             "--stream-to=-",

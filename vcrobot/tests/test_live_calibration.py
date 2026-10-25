@@ -15,7 +15,7 @@ for path in (ROOT, CALIBRATION):
 from live_robot_calibration import parse_surface_command
 from rgbd_visual_odometry import (estimate_pose_from_correspondences,
                                   invert_transform)
-from slave_v4l2_odometry import decode_frame, parse_distortion
+from slave_v4l2_odometry import V4L2_FOURCC, decode_frame, parse_distortion
 
 
 class CommandParsingTests(unittest.TestCase):
@@ -59,6 +59,9 @@ class RGBDOdometryTests(unittest.TestCase):
 
 
 class V4L2FrameTests(unittest.TestCase):
+    def test_z16_fourcc_preserves_the_required_trailing_space(self):
+        self.assertEqual(V4L2_FOURCC["Z16"], "0x2036315a")
+
     def test_grey_and_little_endian_z16_frames_are_decoded(self):
         grey = decode_frame(bytes([1, 2, 3, 4, 5, 6]), 3, 2, "GREY")
         np.testing.assert_array_equal(grey, [[1, 2, 3], [4, 5, 6]])
