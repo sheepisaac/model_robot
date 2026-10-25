@@ -19,7 +19,8 @@ texture loss, moving-object errors, or skid-steer slip on its own.
 PC live_robot_calibration.py
   +-- TCP/50220 -> drive_sync.py -> UGV serial + T=1001 odl/odr feedback
   +-- TCP/50210 -> slave_arm.py  -> RoArm serial + T=1051 x/y/z/t feedback
-  `-- TCP/50240 -> slave_rgbd_odometry.py -> L515 only (never motors)
+  `-- TCP/50240 -> slave_rgbd_odometry.py or slave_v4l2_odometry.py
+                    -> L515 only (never motors)
 ```
 
 Physical motion is disabled unless the master is launched with both
@@ -70,6 +71,37 @@ the Pi image, plus NumPy and OpenCV. Then start the camera service:
 ```bash
 python3 slave_rgbd_odometry.py --listen 0.0.0.0 --port 50240
 ```
+
+### V4L2-only L515 service (no ROS or librealsense)
+
+On the tested L515, V4L2 enumerates registered 8-bit IR on `/dev/video0`, Z16
+depth on `/dev/video2`, packed confidence on `/dev/video4`, and YUYV colour on
+`/dev/video6`. The V4L2 service deliberately uses IR plus depth, so it does not
+need colour-to-depth alignment:
+
+```bash
+sudo apt install -y v4l-utils python3-numpy python3-opencv
+
+python3 slave_v4l2_odometry.py \
+  --listen 0.0.0.0 --port 50240 \
+  --ir-device /dev/video0 --depth-device /dev/video2 \
+  --width 480 --height 640 --fps 30 \
+  --depth-scale-m ACTUAL_METRES_PER_Z16_UNIT \
+  --fx ACTUAL_IR_FX --fy ACTUAL_IR_FY \
+  --ppx ACTUAL_IR_PPX --ppy ACTUAL_IR_PPY
+```
+
+The width and height above intentionally follow the raw V4L2 profiles reported
+by this camera, rather than silently assuming librealsense's orientation. Use
+intrinsics for that exact raw GREY profile. V4L2 provides pixels but does not
+provide the RealSense factory calibration, so the service requires explicit
+depth scale and IR intrinsics. Guessed or template values must not be used to
+accept fitted robot parameters. The service labels them
+`MANUAL_REQUIRES_VALIDATION` in every hello/status response.
+
+`slave_v4l2_odometry.py` uses the same protocol and port as the pyrealsense2
+service. No PC master or live-calibration YAML change is required. Only one of
+the two odometry services may run at a time.
 
 Only one process can own the L515 pipeline. Stop the regular image-acquisition
 slave while this calibration service is running.

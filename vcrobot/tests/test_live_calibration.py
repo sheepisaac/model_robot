@@ -15,6 +15,7 @@ for path in (ROOT, CALIBRATION):
 from live_robot_calibration import parse_surface_command
 from rgbd_visual_odometry import (estimate_pose_from_correspondences,
                                   invert_transform)
+from slave_v4l2_odometry import decode_frame, parse_distortion
 
 
 class CommandParsingTests(unittest.TestCase):
@@ -55,6 +56,23 @@ class RGBDOdometryTests(unittest.TestCase):
         np.testing.assert_allclose(estimated[:3, 3], translation, atol=3e-3)
         np.testing.assert_allclose(estimated.dot(invert_transform(estimated)),
                                    np.eye(4), atol=1e-8)
+
+
+class V4L2FrameTests(unittest.TestCase):
+    def test_grey_and_little_endian_z16_frames_are_decoded(self):
+        grey = decode_frame(bytes([1, 2, 3, 4, 5, 6]), 3, 2, "GREY")
+        np.testing.assert_array_equal(grey, [[1, 2, 3], [4, 5, 6]])
+        raw_depth = np.array([1, 256, 1000, 65535], dtype="<u2").tobytes()
+        depth = decode_frame(raw_depth, 2, 2, "Z16")
+        np.testing.assert_array_equal(depth, [[1, 256], [1000, 65535]])
+
+    def test_frame_size_and_distortion_validation(self):
+        with self.assertRaises(ValueError):
+            decode_frame(b"too short", 2, 2, "Z16")
+        np.testing.assert_array_equal(parse_distortion("0,0,0,0,0"),
+                                      np.zeros(5))
+        with self.assertRaises(ValueError):
+            parse_distortion("0,0,0")
 
 
 if __name__ == "__main__":
