@@ -137,7 +137,8 @@ class LiveRobotConsole(MotionDemo):
             try:
                 kind = command["kind"]
                 if kind == "ugv":
-                    record = self.session.run_ugv(command)
+                    record = self.session.run_ugv(
+                        command, require_visual_odometry=False)
                 elif kind == "arm":
                     # Four bare numbers intentionally preserve the existing
                     # ctrl_armSimple.py behavior: send one direct absolute
@@ -231,7 +232,11 @@ class LiveRobotConsole(MotionDemo):
 
         old_base = self.odometry.base_pose.copy()
         if kind == "ugv":
-            relative = record["nominal_vs_visual"]["measured"]["matrix"]
+            comparison_record = record["nominal_vs_visual"]
+            transform_key = ("measured" if
+                             record.get("visual_odometry_available", True)
+                             else "predicted")
+            relative = comparison_record[transform_key]["matrix"]
             base_at_start = (self._motion_base_start if
                              self._motion_base_start is not None else old_base)
             new_base = compose_planar_pose(base_at_start, relative)
@@ -261,13 +266,27 @@ class LiveRobotConsole(MotionDemo):
         rmse = (float(vo.get("reprojection_rmse_px", math.nan))
                 if vo is not None else math.nan)
         if kind == "ugv":
-            fit = record["fit_row"]
-            self.last_metrics = (
-                "UGV VO: {:+.1f} mm, yaw {:+.2f} deg | inliers={} | "
-                "RMSE={:.2f}px".format(
-                    1000.0 * float(fit["distance_m"]),
-                    math.degrees(float(fit["yaw_delta_rad"])), inliers, rmse))
-            self.status = "UGV pulse completed and stopped; pose updated from L515."
+            if record.get("visual_odometry_available", True):
+                fit = record["fit_row"]
+                self.last_metrics = (
+                    "UGV VO: {:+.1f} mm, yaw {:+.2f} deg | inliers={} | "
+                    "RMSE={:.2f}px".format(
+                        1000.0 * float(fit["distance_m"]),
+                        math.degrees(float(fit["yaw_delta_rad"])),
+                        inliers, rmse))
+                self.status = (
+                    "UGV pulse completed and stopped; pose updated from L515.")
+            else:
+                predicted = record["nominal_vs_visual"]["predicted"]
+                self.last_metrics = (
+                    "UGV nominal update={:+.1f}mm, {:+.2f}deg | "
+                    "VO unavailable: {}".format(
+                        1000.0 * float(predicted["distance_m"]),
+                        math.degrees(float(predicted["yaw_rad"])),
+                        record.get("visual_odometry_error", "unknown error")))
+                self.status = (
+                    "UGV pulse completed and stopped; VO unavailable, so the "
+                    "display used nominal motion.")
         else:
             target = record["command"]
             error_mm = float(np.linalg.norm([

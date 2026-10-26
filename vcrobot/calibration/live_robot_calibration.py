@@ -220,6 +220,20 @@ class LiveCalibration:
             {"type": "arm_feedback", "timeout": 1.5}, "arm_feedback")
         return reply["position"]
 
+    def estimate_visual_odometry(self, required=True):
+        """Read VO, optionally degrading a sensor failure to a measurement gap.
+
+        Batch calibration requires every metric observation.  Interactive
+        control does not: a textureless camera frame must not turn an already
+        verified physical arm command into a reported motor-control failure.
+        """
+        try:
+            return self.vo.estimate(), None
+        except Exception as exc:
+            if required:
+                raise
+            return None, str(exc)
+
     def probe(self):
         return {"mode": "read_only_probe", "timestamp_ns": time.time_ns(),
                 "drive": self.drive_feedback(), "arm": self.arm_feedback(),
@@ -243,18 +257,23 @@ class LiveCalibration:
         if not 0.1 <= command["duration"] <= float(limits["max_ugv_duration_s"]):
             raise ValueError("UGV duration is outside the configured safety range")
 
-    def _check_arm_limits(self, before, command):
+    def _check_arm_limits(self, before, command,
+                          allow_large_absolute=False):
         limits = self.config["safety"]
         xyz_step = np.linalg.norm([
             command["x"] - before["x"], command["y"] - before["y"],
             command["z"] - before["z"]])
-        if xyz_step > float(limits["max_arm_xyz_step_mm"]):
+        t_step = abs(command["t"] - before["t"])
+        if (xyz_step > float(limits["max_arm_xyz_step_mm"]) and
+                not allow_large_absolute):
             raise ValueError(f"arm Cartesian step {xyz_step:.1f} mm exceeds limit")
-        if abs(command["t"] - before["t"]) > float(limits["max_arm_t_step_rad"]):
+        if (t_step > float(limits["max_arm_t_step_rad"]) and
+                not allow_large_absolute):
             raise ValueError("arm t step exceeds configured safety limit")
         pose_to_joints(self.model, command)
+        return float(xyz_step), float(t_step)
 
-    def run_ugv(self, command):
+    def run_ugv(self, command, require_visual_odometry=True):
         self._check_ugv_limits(command)
         arm_before = self.arm_feedback()
         joints = pose_to_joints(self.model, arm_before)
@@ -273,15 +292,38 @@ class LiveCalibration:
         time.sleep(float(self.config["sampling"].get("settle_s", 0.5)))
         telemetry_after = self.drive_feedback()
         arm_after = self.arm_feedback()
-        vo = self.vo.estimate()
+        vo, vo_error = self.estimate_visual_odometry(
+            required=require_visual_odometry)
         if np.linalg.norm([arm_after[key] - arm_before[key]
                            for key in ("x", "y", "z")]) > 3.0:
             raise RuntimeError("arm moved during UGV-only trial")
 
-        T_C0_C1 = np.asarray(vo["T_C0_C1"], dtype=float)
-        T_BC = self.model.compute_camera_pose(np.zeros(3), joints)
-        T_B0_B1_visual = T_BC.dot(T_C0_C1).dot(invert_transform(T_BC))
         from robot_models.transforms import pose2d_transform
+        nominal_mps = float(self.config["ugv"].get(
+            "nominal_mps_per_command", 1.0))
+        expected_pose = self.model.ugv.predict_motion(
+            np.zeros(3), left * nominal_mps, right * nominal_mps, duration)
+        T_expected = pose2d_transform(expected_pose)
+        if vo is not None:
+            T_C0_C1 = np.asarray(vo["T_C0_C1"], dtype=float)
+            T_BC = self.model.compute_camera_pose(np.zeros(3), joints)
+            T_B0_B1_visual = T_BC.dot(T_C0_C1).dot(invert_transform(T_BC))
+            nominal_vs_visual = comparison(T_expected, T_B0_B1_visual)
+            visual_yaw = yaw_from_transform(T_B0_B1_visual)
+            visual_distance = math.copysign(
+                float(np.linalg.norm(T_B0_B1_visual[:2, 3])),
+                float(T_B0_B1_visual[0, 3]))
+            fit_row = {"v_left": left, "v_right": right,
+                       "duration": duration, "distance_m": visual_distance,
+                       "yaw_delta_rad": visual_yaw}
+        else:
+            T_B0_B1_visual = None
+            nominal_vs_visual = {
+                "status": "UNAVAILABLE_VISUAL_ODOMETRY_REJECTED",
+                "error": vo_error,
+                "predicted": transform_summary(T_expected),
+            }
+            fit_row = None
         has_encoder_odometry = firmware_odometry_available(
             telemetry_before, telemetry_after)
         if has_encoder_odometry:
@@ -290,8 +332,16 @@ class LiveCalibration:
                 self.model.ugv.parameters.firmware_odometry_unit)
             encoder_pose = self.model.ugv.integrate_odometry(
                 np.zeros(3), {"delta_left_m": dl, "delta_right_m": dr})
-            encoder_vs_visual = comparison(
-                pose2d_transform(encoder_pose), T_B0_B1_visual)
+            if T_B0_B1_visual is not None:
+                encoder_vs_visual = comparison(
+                    pose2d_transform(encoder_pose), T_B0_B1_visual)
+            else:
+                encoder_vs_visual = {
+                    "status": "UNAVAILABLE_VISUAL_ODOMETRY_REJECTED",
+                    "error": vo_error,
+                    "encoder": transform_summary(
+                        pose2d_transform(encoder_pose)),
+                }
             firmware_wheel_delta_m = [dl, dr]
         else:
             encoder_vs_visual = {
@@ -299,33 +349,35 @@ class LiveCalibration:
                 "note": "L515 visual odometry remains the metric reference",
             }
             firmware_wheel_delta_m = None
-        nominal_mps = float(self.config["ugv"].get(
-            "nominal_mps_per_command", 1.0))
-        expected_pose = self.model.ugv.predict_motion(
-            np.zeros(3), left * nominal_mps, right * nominal_mps, duration)
-        T_expected = pose2d_transform(expected_pose)
-        visual_yaw = yaw_from_transform(T_B0_B1_visual)
-        visual_distance = math.copysign(
-            float(np.linalg.norm(T_B0_B1_visual[:2, 3])),
-            float(T_B0_B1_visual[0, 3]))
-        return {"kind": "ugv", "command": command,
-                "reference": reference, "visual_odometry": vo,
+        record = {"kind": "ugv", "command": command,
+                "reference": reference,
+                "visual_odometry_available": vo is not None,
+                "visual_odometry": vo,
+                "visual_odometry_error": vo_error,
                 "firmware_before": telemetry_before,
                 "firmware_after": telemetry_after,
                 "firmware_odometry_available": has_encoder_odometry,
                 "firmware_wheel_delta_m": firmware_wheel_delta_m,
-                "nominal_vs_visual": comparison(T_expected, T_B0_B1_visual),
+                "nominal_vs_visual": nominal_vs_visual,
                 "encoder_vs_visual": encoder_vs_visual,
-                "fit_row": {"v_left": left, "v_right": right,
-                            "duration": duration, "distance_m": visual_distance,
-                            "yaw_delta_rad": visual_yaw},
                 "arm_before": arm_before, "arm_after": arm_after}
+        if fit_row is not None:
+            record["fit_row"] = fit_row
+        return record
 
-    def run_arm(self, command):
+    def run_arm(self, command, allow_large_absolute=False,
+                require_visual_odometry=True):
         before = self.arm_feedback()
         requested_command = command
         command = resolve_arm_command(before, command)
-        self._check_arm_limits(before, command)
+        # The interactive live console can deliberately reproduce
+        # ctrl_armSimple.py's direct absolute X/Y/Z/T behavior.  Relative moves
+        # and batch calibration plans retain the conservative per-step limits.
+        if allow_large_absolute and requested_command["kind"] != "arm":
+            raise ValueError(
+                "large-step override is only valid for absolute arm commands")
+        xyz_step_mm, t_step_rad = self._check_arm_limits(
+            before, command, allow_large_absolute=allow_large_absolute)
         telemetry_before = self.drive_feedback()
         joints_before = pose_to_joints(self.model, before)
         reference = self.vo.reset_reference()
@@ -335,9 +387,12 @@ class LiveCalibration:
                                "y": command["y"], "z": command["z"],
                                "t": command["t"], "spd": speed},
                               separators=(",", ":"))
+        verification_timeout = min(
+            30.0, max(10.0, 3.0 + xyz_step_mm / 25.0 + t_step_rad / 0.15))
         verification = {"target": {key: command[key]
                                     for key in ("x", "y", "z", "t")},
-                        "timeout": 10.0, "feedback_start_delay": 1.0,
+                        "timeout": verification_timeout,
+                        "feedback_start_delay": 1.0,
                         "xyz_tolerance": 8.0, "t_tolerance": 0.15,
                         "stable_samples": 2}
         results = self.arm.dispatch(
@@ -366,13 +421,28 @@ class LiveCalibration:
         T_BE_before = self.model.end_pose_world(np.zeros(3), joints_before)
         T_BE_after = self.model.end_pose_world(np.zeros(3), joints_after)
         T_predicted = invert_transform(T_before).dot(T_after)
-        vo = self.vo.estimate()
-        T_visual = np.asarray(vo["T_C0_C1"], dtype=float)
+        vo, vo_error = self.estimate_visual_odometry(
+            required=require_visual_odometry)
+        if vo is not None:
+            T_visual = np.asarray(vo["T_C0_C1"], dtype=float)
+            model_vs_visual = comparison(T_predicted, T_visual)
+        else:
+            model_vs_visual = {
+                "status": "UNAVAILABLE_VISUAL_ODOMETRY_REJECTED",
+                "error": vo_error,
+                "predicted": transform_summary(T_predicted),
+            }
         return {"kind": "arm", "command": command,
                 "requested_command": requested_command,
+                "direct_absolute_command": bool(allow_large_absolute),
+                "requested_xyz_step_mm": xyz_step_mm,
+                "requested_t_step_rad": t_step_rad,
+                "verification_timeout_s": verification_timeout,
                 "reference": reference,
+                "visual_odometry_available": vo is not None,
                 "visual_odometry": vo,
-                "model_vs_visual": comparison(T_predicted, T_visual),
+                "visual_odometry_error": vo_error,
+                "model_vs_visual": model_vs_visual,
                 "firmware_before": before, "firmware_after": after,
                 "T_BE_before": T_BE_before.tolist(),
                 "T_BE_after": T_BE_after.tolist(),

@@ -247,10 +247,12 @@ calibration motion; it continues to enforce `max_arm_xyz_step_mm` and
 `max_arm_t_step_rad`. The non-interactive `live_robot_calibration.py` command
 plan also retains both limits.
 
-In the interactive console, a RoArm command that passes firmware feedback
-verification remains successful when the L515 rejects the corresponding frame
+In the interactive console, a verified RoArm command or a completed bounded
+UGV pulse remains successful when the L515 rejects the corresponding frame
 (for example, a textureless image with no ORB descriptors). The JSONL record
 then contains `visual_odometry_available: false`, the sensor error, and the
-model-predicted transform; the OpenCV model is updated from firmware arm
-feedback. Batch calibration still requires VO and aborts that sample, because
-silently fitting a calibration without a metric observation would be invalid.
+model-predicted transform. The OpenCV arm is updated from firmware feedback;
+the UGV display falls back to nominal command motion because the General
+Driver has no wheel odometry. Batch calibration still requires VO and aborts
+that sample, because silently fitting a calibration without a metric
+observation would be invalid.
