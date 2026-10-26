@@ -13,13 +13,15 @@ for path in (ROOT, CALIBRATION):
         sys.path.insert(0, str(path))
 
 from live_robot_calibration import (firmware_distance_delta,
-                                    firmware_odometry_available,
+                                    firmware_odometry_available, LiveCalibration,
                                     parse_surface_command, pose_to_joints,
                                     resolve_arm_command)
 from robot_models import IntegratedRobotCameraModel
 from rgbd_visual_odometry import (estimate_pose_from_correspondences,
                                   invert_transform)
 from slave_v4l2_odometry import V4L2_FOURCC, decode_frame, parse_distortion
+from visualization.live_robot_console import (compose_planar_pose,
+                                               parse_live_command)
 
 
 class CommandParsingTests(unittest.TestCase):
@@ -72,6 +74,62 @@ class CommandParsingTests(unittest.TestCase):
         achieved = model.roarm.firmware_pose(joints)
         self.assertLess(np.linalg.norm(
             achieved[:3] - [42.56144571, -0.195866703, 47.80462851]), 4.0)
+
+    def test_live_console_adds_bounded_default_duration(self):
+        command = parse_live_command("go 0.06 -0.04", 0.7)
+        self.assertEqual(command["kind"], "ugv")
+        self.assertAlmostEqual(command["left"], 0.06)
+        self.assertAlmostEqual(command["right"], -0.04)
+        self.assertAlmostEqual(command["duration"], 0.7)
+
+    def test_live_console_rejects_nonfinite_motion(self):
+        with self.assertRaises(ValueError):
+            parse_live_command("go nan 0.1", 0.6)
+        with self.assertRaises(ValueError):
+            parse_live_command("0 0 inf 3")
+
+    def test_live_console_composes_visual_planar_increment(self):
+        base = np.array([1.0, 2.0, math.pi / 2.0])
+        relative = np.eye(4)
+        relative[0, 3] = 0.25
+        angle = math.radians(10.0)
+        relative[:2, :2] = [[math.cos(angle), -math.sin(angle)],
+                            [math.sin(angle), math.cos(angle)]]
+        result = compose_planar_pose(base, relative)
+        np.testing.assert_allclose(result[:2], [1.0, 2.25], atol=1e-10)
+        self.assertAlmostEqual(result[2], math.radians(100.0))
+
+    def test_direct_absolute_console_move_can_bypass_calibration_step_limit(self):
+        session = object.__new__(LiveCalibration)
+        session.config = {"safety": {
+            "max_arm_xyz_step_mm": 40.0,
+            "max_arm_t_step_rad": 0.30,
+        }}
+        session.model = IntegratedRobotCameraModel.from_yaml(
+            ROOT / "configs" / "robot_calibration.template.yaml")
+        before = {"x": 10.0, "y": 0.0, "z": 200.0, "t": 3.5}
+        target = {"kind": "arm", "x": 100.0, "y": 0.0,
+                  "z": 480.0, "t": 4.1}
+        with self.assertRaises(ValueError):
+            session._check_arm_limits(before, target)
+        xyz_step, t_step = session._check_arm_limits(
+            before, target, allow_large_absolute=True)
+        self.assertAlmostEqual(xyz_step, math.hypot(90.0, 280.0))
+        self.assertAlmostEqual(t_step, 0.6)
+
+    def test_optional_visual_odometry_failure_becomes_measurement_gap(self):
+        class RejectingVO:
+            @staticmethod
+            def estimate():
+                raise RuntimeError("current frame has no ORB descriptors")
+
+        session = object.__new__(LiveCalibration)
+        session.vo = RejectingVO()
+        measurement, error = session.estimate_visual_odometry(required=False)
+        self.assertIsNone(measurement)
+        self.assertIn("no ORB descriptors", error)
+        with self.assertRaises(RuntimeError):
+            session.estimate_visual_odometry(required=True)
 
 
 class RGBDOdometryTests(unittest.TestCase):

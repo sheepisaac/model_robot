@@ -68,6 +68,8 @@ The model therefore connects the following pieces:
 - World-frame camera position and optical-axis changes caused by robot motion
 - Reachability and motion-cost information needed by the NBV planner
 - A simulation-only OpenCV demo that never sends commands to physical motors
+- A guarded live OpenCV console for combined UGV, RoArm, L515 VO, feedback,
+  logging, and integrated-model visualization
 
 Because the L515 is mounted on the moving gripper member, the central
 camera-pose composition is:
@@ -198,6 +200,21 @@ quit           # close the demo
 
 Use the Up/Down keys to recall command history. `Esc` also closes the window.
 The demo is simulation-only and does not transmit commands to the motors.
+
+For guarded control and visualization of the physical robot, first start the
+three robot-side services described in
+[`vcrobot/LIVE_CALIBRATION.md`](vcrobot/LIVE_CALIBRATION.md), then run:
+
+```bash
+python3 visualization/live_robot_console.py \
+  configs/live_calibration.local.yaml \
+  --execute \
+  --acknowledge-motion I_HAVE_CLEARED_THE_ROBOT
+```
+
+Unlike the simulation command, `go L R` in the live console is always a
+bounded pulse followed by an automatic stop. See the live-calibration guide
+for all commands and safety behavior.
 
 Change the display azimuth when a different viewing direction is useful:
 

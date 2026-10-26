@@ -41,12 +41,6 @@ torque. The slave refuses that release if a job is pending or either wheel is
 not at zero; an abnormal disconnect therefore keeps the original emergency
 `T=0` behavior.
 
-On a normal stopped shutdown the master requests a checked clean release, so
-the drive connection can close without the global `T=0` that also releases arm
-torque. The slave refuses that release if a job is pending or either wheel is
-not at zero; an abnormal disconnect therefore keeps the original emergency
-`T=0` behavior.
-
 Do not rely on software limits as collision protection. Put the robot on a
 clear, level test area, keep an emergency-stop method within reach, begin below
 the template limits, and supervise every trial.
@@ -197,3 +191,66 @@ validate on a held-out motion sequence before marking any field calibrated.
 The moving gripper still needs several validated fixed-`t` datasets to derive
 the final `t -> T_EG(t)` lookup and `T_GC`; a single fixed-`t` hand-eye result
 cannot identify both independently.
+
+## Live all-in-one OpenCV console
+
+`visualization/live_robot_console.py` connects to the same three services and
+combines guarded physical control, firmware feedback, L515 visual odometry,
+the 2D base trail, and the 3D arm/gripper/camera model in one OpenCV window.
+It appends each completed or failed transaction to
+`results/live_control.jsonl` by default.
+
+Read-only connection and visualization:
+
+```bash
+python3 visualization/live_robot_console.py \
+  configs/live_calibration.local.yaml
+```
+
+After clearing the physical workspace, enable typed motion commands:
+
+```bash
+python3 visualization/live_robot_console.py \
+  configs/live_calibration.local.yaml \
+  --execute \
+  --acknowledge-motion I_HAVE_CLEARED_THE_ROBOT \
+  --output results/live_control.jsonl
+```
+
+Supported window commands are:
+
+```text
+go 0.06 0.06             # bounded 0.6-second pulse, then automatic stop
+go 0.06 -0.06 0.8        # explicit duration in seconds
+100 0 480 4.1            # one direct absolute RoArm target, as ctrl_armSimple
+arm_delta 0 0 10 0       # fresh-feedback-relative RoArm move
+stop                      # send a normal UGV stop when the worker is idle
+probe                     # refresh all read-only service feedback
+reference                 # reset the L515 VO reference frame
+zero                      # reset display world origin; do not move hardware
+clear                     # clear visualization trails
+quit                      # safe shutdown
+```
+
+Only one bounded transaction is accepted at a time. `go L R` is deliberately
+converted to a short pulse rather than a latched velocity; its duration can be
+changed with `--default-drive-duration` but cannot exceed the YAML safety
+limit. Closing the window waits for the active bounded transaction and sends a
+final normal stop before releasing the drive connection.
+
+The four-number `X Y Z T` form deliberately preserves the existing
+`ctrl_armSimple.py` behavior: it sends one direct absolute firmware target,
+even when the difference from the current pose exceeds the conservative
+calibration step limits. Firmware-compatible IK/joint clamps and post-command
+Cartesian feedback verification still apply. Use `arm_delta` for incremental
+calibration motion; it continues to enforce `max_arm_xyz_step_mm` and
+`max_arm_t_step_rad`. The non-interactive `live_robot_calibration.py` command
+plan also retains both limits.
+
+In the interactive console, a RoArm command that passes firmware feedback
+verification remains successful when the L515 rejects the corresponding frame
+(for example, a textureless image with no ORB descriptors). The JSONL record
+then contains `visual_odometry_available: false`, the sensor error, and the
+model-predicted transform; the OpenCV model is updated from firmware arm
+feedback. Batch calibration still requires VO and aborts that sample, because
+silently fitting a calibration without a metric observation would be invalid.
